@@ -95,9 +95,6 @@ def build_vectorstore_from_pdfs(files, embed_backend: str = "openai"):
         if not HAS_GEMINI:
             raise RuntimeError("Gemini 임베딩 사용 불가: langchain-google-genai 설치 필요")
         embedding = GoogleGenerativeAIEmbeddings(model="text-embedding-004")
-    else:
-        from langchain_community.embeddings import HuggingFaceEmbeddings
-        embedding = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
 
     return FAISS.from_documents(splits, embedding)
 
@@ -136,7 +133,7 @@ embed_backend = st.sidebar.selectbox("임베딩 백엔드", ["openai", "gemini",
 uploaded = st.sidebar.file_uploader("PDF 업로드 (여러 개 가능)", type=["pdf"], accept_multiple_files=True)
 
 colA, colB = st.sidebar.columns(2)
-if colA.button("임베딩 생성", use_container_width=True):
+if st.sidebar.button("생성", use_container_width=True):
     if not uploaded:
         st.sidebar.warning("PDF를 먼저 업로드하세요.")
     else:
@@ -147,10 +144,10 @@ if colA.button("임베딩 생성", use_container_width=True):
         except Exception as e:
             st.sidebar.error(f"임베딩 실패: {e}")
 
-if colB.button("임베딩 초기화", use_container_width=True):
+if st.sidebar.button("초기화", use_container_width=True):
     st.session_state.pop("vectorstore", None)
     st.session_state.pop("qa_chain", None)
     st.sidebar.info("임베딩을 비웠습니다.")
 
 st.title("반도체 공정 학습 튜터")
-st.markdown("다쳤을 땐 쎄쎄")
+st.markdown("임시 디자인")
