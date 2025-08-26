@@ -17,6 +17,6 @@ page_9 = st.Page("8.py", title="8.평탄화 (CMP)", icon="📟")
 page_10 = st.Page("9.py", title="9.질문(임시요)", icon="📟")
 
 
-page = st.navigation([page_main,page_1,page_2,page_3,page_4,page_5,page_6,page_7,page_8,page_9])
+page = st.navigation([page_main,page_1,page_2,page_3,page_4,page_5,page_6,page_7,page_8,page_9, page_10])
 
 page.run()
