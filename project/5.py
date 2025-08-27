@@ -1,5 +1,7 @@
 import os
 import streamlit as st
+import streamlit.components.v1 as components
+
 from LLM import (
     is_similar,
     get_llm_backend,
@@ -9,96 +11,287 @@ from LLM import (
     extract_questions,
     parse_mc_questions,
     parse_eval,
+    get_chat_llm,
+    get_llm_backend,
+    get_chat_llm,
+    hist_pairs,
+    hist_text,
+    summarize_docs
 )
 
 st.set_page_config(page_title="이온주입", layout="wide")
 
 st.header("5) 이온주입 (Ion Implantation)")
 
-st.subheader("개요")
-st.write("가속된 이온을 웨이퍼에 주입하여 원하는 농도·깊이로 도핑합니다.")
+CATEGORY_NAME = "이온주입"
 
+st.subheader("개요")
+st.write(
+    "가속된 도펀트 이온(B, P, As 등)을 웨이퍼에 주입하여 원하는 깊이와 농도로 도핑하는 공정입니다. "
+    "빔 에너지·도즈·빔 각도·채널링 억제·커런트/스캔 균일도 제어가 중요하며, 주입 후 활성화 어닐(RTA/스파이크)로 "
+    "전기적 활성화 및 격자 결함을 회복합니다."
+)
+
+# 핵심 포인트 (툴팁)
 st.subheader("핵심 포인트")
 st.markdown("""
-- 에너지/도즈/각도, 채널링 방지
-- Damage anneal과 활성화 어닐
-""")
+- <span title="표면 오염/수분 제거, PR/하드마스크 상태 점검">전처리 세정</span> →
+  <span title="빔 에너지/도즈/스캔으로 목표 프로파일 형성">이온 주입</span> →
+  <span title="틸트/트위스트로 채널링 억제, 오버레이 고려">각도/채널링 제어</span> →
+  <span title="RTA/스파이크로 활성화·결함 회복, 확산 최소화">활성화 어닐</span> →
+  <span title="Rs, SIMS, 결함/누설 평가로 레시피 피드백">검사/계측</span>
+""", unsafe_allow_html=True)
+st.markdown("- 핵심 지표: 도즈(ions/cm²), 투영거리 Rp/분산 ΔRp, 시트저항 Rs, 활성도(액티브 도핑), 표면/격자 결함, 균일도")
 
+# 프로세스(가로 스크롤 카드)
 st.subheader("프로세스(가로 스크롤 카드)")
-steps = ["Alignment", "Implant", "Damage Anneal", "Activation", "Metrology"]
+steps = ["전처리 세정", "이온 주입", "각도/채널링 제어", "활성화 어닐", "검사/계측"]
 
 html = """
 <div style="overflow-x:auto; padding:6px 0;">
-  <div style="display:flex; gap:12px; align-items:center; min-height:96px;">
-    {items}
-  </div>
+  <div style="display:flex; gap:12px; align-items:center; min-height:96px;">{items}</div>
 </div>
 """
 chip = """
-<div style="flex:0 0 auto; min-width:160px; max-width:220px;
+<div style="flex:0 0 auto; min-width:200px; max-width:260px;
             padding:12px 14px; border:1.5px solid #d0d4dc; border-radius:14px;
             box-shadow:0 1px 3px rgba(0,0,0,0.06); background:#fff; text-align:center;">
   <div style="font-size:14px; font-weight:600;">{label}</div>
 </div>
 <div style="flex:0 0 auto; font-size:20px; margin:0 2px;">➜</div>
 """
-
 items = "".join(
-    (chip.format(label=s) if i < len(steps)-1
-     else chip.replace('<div style="flex:0 0 auto; font-size:20px; margin:0 2px;">➜</div>', '').format(label=s))
+    (chip.format(label=s) if i < len(steps)-1 else chip.replace(
+        '<div style="flex:0 0 auto; font-size:20px; margin:0 2px;">➜</div>', ''
+    ).format(label=s))
     for i, s in enumerate(steps)
 )
-
-import streamlit.components.v1 as components
 components.html(html.format(items=items), height=120, scrolling=False)
 
-# ---------------- 질의응답 (RAG · 챗봇 UI) ----------------
+# 공정 단계 설명 + 진도 관리
+st.subheader("공정 단계 설명 및 진도 관리")
+
+steps_data = [
+    {
+        "name": "전처리 세정",
+        "icon": "🧼",
+        "desc": """
+🧼 **전처리 세정(Pre-clean)**
+
+**무엇을/왜**
+- 표면 유기물·금속이온·파티클·수분 제거 → 전하 축적/마이크로 마스킹 방지, 주입 균일도 향상.
+- PR/하드마스크 두께·내구성 확인 → 주입 중 스퍼터/데미지 대비.
+
+**어떻게**
+- SC-1/SC-2 후 DIW 린스, 건조(스핀/IPA/베이크).
+- 필요 시 PR 하드베이크로 내플라즈마성 향상, 또는 하드마스크( SiO₂/SiN ) 상태 점검.
+
+**주의사항**
+- 과세정/과건조는 PR 크랙·에지 리프트 유발 가능.
+- 실리콘 표면의 수분/오염은 빔 전하 축적(차징)과 국부 과주입을 초래.
+
+🎯 **핵심 요약**
+- **청정·건조·마스크 상태**가 주입 프로파일 재현성의 출발점.
+"""
+    },
+    {
+        "name": "이온 주입",
+        "icon": "🚀",
+        "desc": """
+🚀 **이온 주입(Ion Implantation)**
+
+**핵심 파라미터**
+- **에너지(keV~MeV)**: 평균 깊이(Rp) 결정, 고에너지일수록 깊이↑.
+- **도즈(ions/cm²)**: 농도·Rs 결정, 고도즈 시 채널 플러깅/스퍼터/표면 거칠기 증가.
+- **빔커런트/스캔**: 처리 속도·열적 부하·균일도(웨이퍼 내/간) 영향.
+- **빔 스폿/스캔 패턴**: 에지/센터 균일도, 오버스캔 보정.
+
+**장비/모드**
+- 싱글 웨이퍼 스캐닝/스텝핑, 클러스터 통합(프리클린/어닐).
+- 중/저/고 에너지 라인, 중성자 빔 필터·다중 전하 상태 관리.
+
+**주의사항**
+- 고도즈에서 PR/하드마스크 스퍼터 → 입자/커버리지 변화.
+- 웨이퍼 온도 상승 → 도펀트 이동/데미지 누적, 쿨링/펄스 운전 고려.
+- 금속 존재 시 재비산·오염 주의, 정전척(ESC) 클린 상태 확보.
+
+🎯 **핵심 요약**
+- **에너지=깊이, 도즈=농도**. 빔 커런트/스캔으로 **균일도와 열부하**를 함께 관리.
+"""
+    },
+    {
+        "name": "각도/채널링 제어",
+        "icon": "📐",
+        "desc": """
+📐 **각도/채널링 제어(Angle / De-channeling)**
+
+**개념**
+- 결정 방향 채널을 따라 이온이 깊게 침투하는 **채널링** 현상 억제가 필수(프로파일 꼬리 방지).
+- **틸트(기울임)**, **트위스트(회전)** 각도를 부여해 결정 채널과 정렬을 피함.
+
+**실무 설정**
+- 보통 **틸트 7°±**, **트위스트 20°±**(장비/공정마다 최적화)로 채널링 최소화.
+- 마스크 에지 근방의 셰도우/리디포지션 고려, 오버레이/PR 슬로프 영향.
+
+**주의사항**
+- 과도한 각도는 **CD 변형/어깨 주입** 유발, 비아/트렌치 내부 주입 불균일.
+- 웨이퍼 워프/ESC 클램핑 불량 시 각도 재현성 저하.
+
+🎯 **핵심 요약**
+- **적정 틸트·트위스트**로 채널링을 억제하되, **오버레이·지오메트리** 영향까지 함께 최적화.
+"""
+    },
+    {
+        "name": "활성화 어닐",
+        "icon": "🔥",
+        "desc": """
+🔥 **활성화 어닐(Activation Anneal)**
+
+**목적**
+- 주입으로 발생한 **격자 결함 회복**, 도펀트의 **전기적 활성화**(치환형 자리 이동).
+
+**방법**
+- **RTA/스파이크 어닐**: 수십 ms~수 s 저열예산로 활성화↑ 확산↓.
+- 퍼니스 어닐: 균일성 우수, 그러나 확산↑ → 노드/디바이스에 따라 선택.
+
+**파라미터**
+- 피크 온도, 램프 업/다운 속도, 유지 시간(소크), 분위기(N₂/Ar/H₂).
+- 메탈 스택/유전막의 열 안정성 윈도우 준수.
+
+**주의사항**
+- 과도한 열 예산은 **접합 확산/쇼트 채널 영향**. 반대로 열 부족 시 활성도↓, Rs↑.
+- H₂ 안전, 산화/환원 분위기 혼입으로 표면/계면 변성 주의.
+
+🎯 **핵심 요약**
+- **짧고 높은 온도(RTA/스파이크)**로 **활성 최대·확산 최소**의 균형을 달성.
+"""
+    },
+    {
+        "name": "검사/계측",
+        "icon": "🔍",
+        "desc": """
+🔍 **검사/계측(Metrology)**
+
+**전기/프로파일**
+- **4-포인트 프로브(4PP)**로 Rs 맵 측정(웨이퍼 내/간 균일도).
+- **SIMS**로 농도 깊이 프로파일(Rp, ΔRp), **SRP**로 캐리어 프로파일 확인.
+- 다이오드/콘택 구조의 **누설/브레이크다운** 측정.
+
+**결함/표면**
+- TEM/XTEM로 결함/재결정화, AFM/SEM로 표면 거칠기·스퍼터 흔적 확인.
+- XRD/라만으로 응력·결정성 평가.
+
+**주의사항**
+- 측정 레시피/보정 일관성 유지(특히 고도즈/고에너지).
+- PR/글라스 잔류물 제거 후 측정, 측정 전 ESD/차징 방지.
+
+🎯 **핵심 요약**
+- **Rs + SIMS**를 핵심 지표로 삼고, 결함·누설을 함께 확인해 **레시피를 즉시 피드백**.
+"""
+    },
+]
+
+# === 페이지 전용 진도 버킷 ===
+PAGE_PROGRESS_KEY = f"{CATEGORY_NAME}_progress"
+# (이전 전역 progress 키 제거하여 충돌 방지)
+st.session_state.pop("progress", None)
+
+if PAGE_PROGRESS_KEY not in st.session_state:
+    st.session_state[PAGE_PROGRESS_KEY] = {s["name"]: False for s in steps_data}
+else:
+    for s in steps_data:
+        st.session_state[PAGE_PROGRESS_KEY].setdefault(s["name"], False)
+
+# 단계별 설명 및 체크박스
+completed = 0
+for s in steps_data:
+    with st.expander(f"{s['icon']} {s['name']}"):
+        st.write(s["desc"])
+        checked = st.checkbox(
+            "이 단계 학습 완료",
+            value=st.session_state[PAGE_PROGRESS_KEY].get(s["name"], False),
+            key=f"{CATEGORY_NAME}_{s['name']}"
+        )
+        st.session_state[PAGE_PROGRESS_KEY][s["name"]] = checked
+        if checked:
+            completed += 1
+
+# 전체 진도율
+total = len(steps_data)
+percent = int((completed / total) * 100)
+st.progress(percent)
+st.caption(f"📘 학습 진도: {completed} / {total} 단계 완료 ({percent}%)")
+# ---------------- 질의응답 (RAG · 챗봇 UI · LLM.py 함수 사용) ----------------
 st.subheader("질의응답 (RAG · 챗봇)")
+
+# ── 질의응답 상단 툴바: 대화 초기화 버튼
+c1, c2 = st.columns([1, 9])
+with c1:
+    if st.button("대화 초기화", key="btn_clear_qa", use_container_width=True, help="질의응답 대화 내용 전체 삭제"):
+        # 대화 이력 비우기
+        st.session_state["chat_history"] = []
+
+        # (선택) 체인 재생성을 원하시면 아래 주석을 해제
+        # st.session_state.pop("qa_chain", None)
+        # st.session_state.pop("qa_mode", None)
+
+        # (선택) 요약 메모리 등을 쓰신다면 함께 초기화
+        # st.session_state.pop("MEMORY", None)
+
+        st.toast("질의응답 대화가 초기화되었습니다. 🧹")
+        (st.rerun if hasattr(st, "rerun") else st.experimental_rerun)()
+
 
 # 체인 준비
 if "vectorstore" not in st.session_state:
     st.info("임베딩 자료가 없습니다. 메인에서 PDF 업로드 → 임베딩 생성 후 이용하세요.")
 else:
     if "qa_chain" not in st.session_state:
-        backend = st.session_state.get("llm_backend", "openai")
-        model   = st.session_state.get("llm_model", "gpt-4o-mini")
+        # ⬇️ LLM.py의 함수로 백엔드/모델/LLM을 가져옵니다.
+        try:
+            backend, model = get_llm_backend()   # "openai" | "gemini", 모델 문자열
+        except Exception:
+            backend = st.session_state.get("llm_backend", "openai")
+            model   = st.session_state.get("llm_model", "gpt-4o-mini")
+
+        try:
+            llm = get_chat_llm(backend=backend, model=model, temperature=0.2)
+        except Exception as e:
+            st.error(f"LLM 초기화 실패: {e}")
+            llm = None
+
         retriever = st.session_state.vectorstore.as_retriever(search_kwargs={"k": 4})
 
-        if backend == "openai":
-            try:
-                from langchain_openai import ChatOpenAI
-                llm = ChatOpenAI(model=model, temperature=0.2)
-            except Exception:
-                try:
-                    from openai import OpenAI
-                    _client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY",""))
-                    class _OpenAILLM:
-                        def invoke(self, prompt):
-                            r = _client.chat.completions.create(
-                                model=model,
-                                messages=[{"role":"user","content":prompt}],
-                                temperature=0.2
-                            )
-                            class _R: pass
-                            _R.content = r.choices[0].message.content
-                            return _R()
-                    llm = _OpenAILLM()
-                except Exception as e:
-                    st.error(f"OpenAI 사용 불가: {e}")
-                    llm = None
-        else:
-            try:
-                from langchain_community.chat_models import ChatOllama
-                llm = ChatOllama(model=model, temperature=0.2)
-            except Exception as e:
-                st.error(f"Ollama 사용 불가: {e}")
-                llm = None
+        # 메모리 지원 체인 구성: CRC 우선, 실패 시 수동 RAG 폴백용 상태 저장
+        st.session_state.retriever = retriever
+        st.session_state.llm = llm
+        st.session_state.qa_mode = "manual"   # 기본 수동, CRC 되면 "crc"로 변경
 
         if llm is not None:
-            from langchain.chains import RetrievalQA
-            st.session_state.qa_chain = RetrievalQA.from_chain_type(
-                llm=llm, chain_type="stuff", retriever=retriever, return_source_documents=True
-            )
+            try:
+                # ▼ CRC 시도 (이전 대화 맥락을 직접 넘길 수 있음)
+                from langchain.chains import ConversationalRetrievalChain
+                from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
+
+                prompt = ChatPromptTemplate.from_messages([
+                    ("system",
+                     "당신의 1차 정보원은 업로드된 PDF입니다. "
+                     "가능하면 PDF 근거를 우선하여 답하고, 부족하면 일반지식으로 보완하되 그 사실을 한 문장으로 표시하십시오. "
+                     "항상 정중한 한국어(존댓말)로 답하십시오."),
+                    MessagesPlaceholder(variable_name="chat_history"),
+                    ("human", "{question}")
+                ])
+
+                st.session_state.qa_chain = ConversationalRetrievalChain.from_llm(
+                    llm=llm,
+                    retriever=retriever,
+                    return_source_documents=True,
+                    combine_docs_chain_kwargs={"prompt": prompt},
+                )
+                st.session_state.qa_mode = "crc"
+            except Exception:
+                # CRC 불가(비호환 LLM 등) → 수동 RAG로 처리
+                st.session_state.qa_chain = None
 
     # 채팅 내역 초기화
     if "chat_history" not in st.session_state:
@@ -127,20 +320,28 @@ else:
                         for i, meta in enumerate(msg["sources"], 1):
                             st.caption(f"{i}. {meta}")
 
-    # 입력창
-    user_q = st.chat_input("질문을 입력하세요… (예: EUV와 DUV 차이)")
-    if user_q:
+    # ===== 입력창 =====
+    with st.form("qa_form", clear_on_submit=True):
+        user_q = st.text_input("질문을 입력하세요… (예: EUV와 DUV 차이)", key="qa_text")
+        submitted = st.form_submit_button("Send")
+
+    # ✅ 버튼을 눌렀고 비어 있지 않을 때만 생성
+    if submitted and user_q and user_q.strip():
         # 1) 사용자 메시지 기록 & 표시
-        st.session_state.chat_history.append({"role":"user", "content":user_q})
+        st.session_state.chat_history.append({"role": "user", "content": user_q})
         with st.chat_message("user"):
             st.markdown(user_q)
-
         # 2) 응답 생성
-        if "qa_chain" in st.session_state and st.session_state.qa_chain is not None:
+        if st.session_state.get("qa_mode") == "crc" and st.session_state.get("qa_chain") is not None:
+            # ---- CRC 경로: 대화 맥락을 chat_history 인자로 직접 전달
             with st.chat_message("assistant"):
                 with st.status("검색 및 응답 생성 중...", expanded=False):
-                    out = st.session_state.qa_chain({"query": user_q})
-                answer = out.get("result", "정보가 부족합니다")
+                    out = st.session_state.qa_chain({
+                        "question": user_q,
+                        "chat_history": hist_pairs(st.session_state.chat_history, limit_pairs=6)  # ← LLM.py 함수
+                    })
+
+                answer = out.get("answer") or out.get("result") or "정보가 부족합니다"
                 st.markdown(answer)
 
                 # 출처 요약
@@ -154,10 +355,68 @@ else:
                             st.caption(f"{i}. {meta}")
                 # 히스토리 저장(출처 포함)
                 st.session_state.chat_history.append({"role":"assistant", "content":answer, "sources":srcs})
+
         else:
+            # ---- 수동 RAG 폴백: 문서 검색 + 대화맥락/발췌를 직접 프롬프트에 주입
             with st.chat_message("assistant"):
-                st.markdown("정보가 부족합니다")
-                st.session_state.chat_history.append({"role":"assistant", "content":"정보가 부족합니다"})
+                with st.status("검색 및 응답 생성 중...", expanded=False):
+                    llm = st.session_state.get("llm", None)
+                    retriever = st.session_state.get("retriever", None)
+
+                    docs = []
+                    if retriever is not None:
+                        try:
+                            docs = retriever.get_relevant_documents(user_q)
+                        except Exception:
+                            docs = []
+
+                    hist_txt = hist_text(st.session_state.chat_history, limit_pairs=6)  # ← LLM.py 함수
+                    doc_block = summarize_docs(docs, max_chars=2400)                  # ← LLM.py 함수
+
+                    if doc_block:
+                        prompt = (
+                            "규칙:\n"
+                            "1) 아래 [PDF 발췌]에서 먼저 근거를 찾고 답하십시오.\n"
+                            "2) 충분한 근거가 없으면 일반지식으로 보완하고, 그 사실을 한 문장으로 표시하십시오.\n"
+                            "3) 한국어(존댓말)로 간결하고 정확히 답하십시오.\n\n"
+                            f"[대화 맥락]\n{hist_txt or '(이전 대화 없음)'}\n\n"
+                            f"[PDF 발췌]\n{doc_block}\n\n"
+                            f"[질문]\n{user_q}\n"
+                        )
+                    else:
+                        prompt = (
+                            "다음은 최근 대화입니다.\n"
+                            f"{hist_txt or '(이전 대화 없음)'}\n\n"
+                            "업로드된 PDF에서 충분한 근거를 찾지 못했습니다. 일반지식으로 답하되, "
+                            "모호하면 '정보가 부족합니다'라고 밝혀주십시오. 한국어(존댓말)로 답하십시오.\n"
+                            f"[질문] {user_q}"
+                        )
+
+                    if llm is None:
+                        answer = "정확히 알 수 없습니다."
+                    else:
+                        try:
+                            out = llm.invoke(prompt)
+                            answer = getattr(out, "content", None) or getattr(out, "text", None) or "정보가 부족합니다"
+                        except Exception:
+                            answer = "정확히 알 수 없습니다."
+
+                st.markdown(answer)
+
+                # 출처 요약(수동 경로)
+                srcs = []
+                for sdoc in (docs or []):
+                    meta = getattr(sdoc, "metadata", {}) or {}
+                    srcs.append(f"{meta.get('source','파일')} p.{meta.get('page','?')}")
+                if srcs:
+                    with st.popover("출처 보기"):
+                        for i, meta in enumerate(srcs, 1):
+                            st.caption(f"{i}. {meta}")
+
+                # 히스토리 저장(출처 포함)
+                st.session_state.chat_history.append({"role":"assistant", "content":answer, "sources":srcs})
+
+
 
 # ---------------- 랜덤 문제 생성기 + 채점 ----------------
 st.subheader("랜덤 문제 생성기")

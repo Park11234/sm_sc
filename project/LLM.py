@@ -136,6 +136,7 @@ def build_vectorstore_from_pdfs(
     splits = splitter.split_documents(docs)
 
     embed_backend = (embed_backend or "openai").lower()
+
     if embed_backend == "openai":
         if HAS_OPENAI:
             embedding = OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY or os.getenv("OPENAI_API_KEY", ""))
@@ -716,4 +717,140 @@ def build_vectorstore_from_pdfs(files: List, embed_backend: str = "openai"):
     # 기본 OpenAI 임베딩 사용
     embedding = OpenAIEmbeddings(openai_api_key=os.environ.get("OPENAI_API_KEY", ""))
     return FAISS.from_documents(splits, embedding)
+
+def message(content: str, is_user: bool = False, key: str | None = None, avatar_style: str | None = None):
+    """
+    streamlit_chat.message 대체용.
+    추가 설치 없이 st.chat_message로 동일 동작을 흉내냅니다.
+    avatar_style, key 인자는 호환성 유지를 위해 받기만 하고 내부에선 사용하지 않습니다.
+    """
+    role = "user" if is_user else "assistant"
+    with st.chat_message(role):
+        st.markdown(content)
+
+def hist_pairs(chat_history: list, limit_pairs: int = 6):
+    msgs = chat_history or []
+    pairs = []
+    i = 0
+    while i < len(msgs) - 1:
+        a, b = msgs[i], msgs[i + 1]
+        if a.get("role") == "user" and b.get("role") == "assistant":
+            pairs.append((a.get("content", ""), b.get("content", "")))
+            i += 2
+        else:
+            i += 1
+    return pairs[-limit_pairs:]
+
+
+def hist_text(chat_history: list, limit_pairs: int = 6):
+    pairs = hist_pairs(chat_history, limit_pairs)
+    lines = []
+    for u, a in pairs:
+        lines.append(f"사용자: {u}\n도우미: {a}")
+    return "\n".join(lines)
+
+
+
+def summarize_docs(docs, max_chars: int = 2400):
+    parts, total = [], 0
+    for d in docs:
+        txt = (getattr(d, "page_content", "") or "").strip()
+        if not txt:
+            continue
+        meta = getattr(d, "metadata", {}) or {}
+        src = meta.get("source", "파일")
+        pg = meta.get("page", "?")
+        frag = f"<<{src} p.{pg}>>\n{txt[:1200]}"
+        parts.append(frag)
+        total += len(frag)
+        if total >= max_chars:
+            break
+    return "\n\n".join(parts)
+# ================= get_chat_llm (OpenAI/Gemini 지원, LangChain ↔ SDK 폴백) =================
+def get_chat_llm(backend: str = "openai", model: str = "gpt-4o-mini", temperature: float = 0.2):
+    """
+    반환값: .invoke(prompt)를 지원하는 객체
+      - LangChain이 있으면 ChatOpenAI / ChatGoogleGenerativeAI 인스턴스
+      - 없으면 SDK 폴백 래퍼(동일하게 .invoke(prompt) 사용 가능, .invoke 결과는 .content 속성 보유)
+    """
+    b = (backend or "openai").lower()
+
+    # ---------------- OpenAI ----------------
+    if b == "openai":
+        # 1) LangChain 우선
+        if 'HAS_LANGCHAIN_OPENAI' in globals() and HAS_LANGCHAIN_OPENAI and 'ChatOpenAI' in globals() and ChatOpenAI:
+            return ChatOpenAI(
+                model=model,
+                temperature=temperature,
+                openai_api_key=OPENAI_API_KEY or os.getenv("OPENAI_API_KEY",""),
+            )
+
+        # 2) OpenAI SDK 폴백 (v1 스타일: from openai import OpenAI as _OpenAIClient)
+        try:
+            from openai import OpenAI as _OpenAIClient  # 이미 상단에서 사용 중인 경로
+            _client = _OpenAIClient(api_key=OPENAI_API_KEY or os.getenv("OPENAI_API_KEY",""))
+            class _OpenAIChatLite:
+                def invoke(self, prompt: str):
+                    r = _client.chat.completions.create(
+                        model=model,
+                        messages=[{"role":"user","content":prompt}],
+                        temperature=temperature
+                    )
+                    class _R: pass
+                    _R.content = r.choices[0].message.content
+                    return _R()
+            return _OpenAIChatLite()
+        except Exception:
+            pass
+
+        # 3) 구 SDK 폴백 (import openai; openai.ChatCompletion)
+        if 'openai' in globals() and openai and hasattr(openai, "ChatCompletion"):
+            openai.api_key = OPENAI_API_KEY or os.getenv("OPENAI_API_KEY","")
+            class _OpenAIChatLegacy:
+                def invoke(self, prompt: str):
+                    r = openai.ChatCompletion.create(
+                        model=model,
+                        messages=[{"role":"user","content":prompt}],
+                        temperature=temperature
+                    )
+                    class _R: pass
+                    _R.content = r.choices[0].message["content"]
+                    return _R()
+            return _OpenAIChatLegacy()
+
+        raise RuntimeError("OpenAI 백엔드를 사용할 수 없습니다. 키/패키지를 확인하세요.")
+
+    # ---------------- Gemini ----------------
+    if b == "gemini":
+        # 1) LangChain 우선
+        if 'HAS_LANGCHAIN_GEMINI' in globals() and HAS_LANGCHAIN_GEMINI and 'ChatGoogleGenerativeAI' in globals() and ChatGoogleGenerativeAI:
+            return ChatGoogleGenerativeAI(
+                model=model,
+                temperature=temperature,
+                google_api_key=GOOGLE_API_KEY or os.getenv("GOOGLE_API_KEY",""),
+            )
+
+        # 2) google-generativeai SDK 폴백
+        try:
+            import google.generativeai as genai
+            genai.configure(api_key=GOOGLE_API_KEY or os.getenv("GOOGLE_API_KEY",""))
+            class _GeminiChatLite:
+                def __init__(self, model_name: str):
+                    self._mdl = genai.GenerativeModel(model_name)
+                def invoke(self, prompt: str):
+                    r = self._mdl.generate_content(prompt)
+                    text = getattr(r, "text", None)
+                    if not text and getattr(r, "candidates", None):
+                        parts = getattr(r.candidates[0].content, "parts", [])
+                        text = getattr(parts[0], "text", "") if parts else ""
+                    class _R: pass
+                    _R.content = text or ""
+                    return _R()
+            return _GeminiChatLite(model)
+        except Exception as e:
+            raise RuntimeError(f"Gemini 백엔드를 사용할 수 없습니다: {e}")
+
+    # ---------------- 기타 ----------------
+    raise RuntimeError("지원하는 LLM 백엔드는 'openai' 또는 'gemini'입니다.")
+
 

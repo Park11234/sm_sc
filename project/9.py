@@ -3,6 +3,7 @@ from typing import List
 import streamlit as st
 from audio_recorder_streamlit import audio_recorder
 from PIL import Image
+from LLM import get_llm_backend, build_vectorstore_from_pdfs, message
 from LLM import (
     APP_TITLE,
     init_session_state,
@@ -95,37 +96,90 @@ with st.container():
             st.success("카메라 이미지 목록을 비웠습니다.")
     st.caption("두 체크 모두 켜면 카메라 이미지가 먼저, 업로드 이미지가 다음으로 함께 전송됩니다.")
 
-# 4️⃣ 채팅 입력 (수동)
-with st.container():
-    st.markdown("### 4️⃣ 채팅 입력")
-    user_text = st.text_area("반도체 공정에 대해 궁금한 점을 입력하십시오.", height=120)
-    col_s1, col_s2 = st.columns([1, 1])
-    with col_s1:
-        send_btn = st.button("질문 보내기", type="primary")
-    with col_s2:
-        tts_toggle = st.checkbox("답변을 음성으로 재생", value=False)
+# =========================
+# 4️⃣ 멀티모달 챗봇 (맨 아래 위치)
+# =========================
+st.markdown("---")
+st.header("질의응답")
 
-    if send_btn:
-        if not user_text.strip():
-            st.warning("질문이 비어 있습니다.")
-        else:
-            images = get_selected_images()
+# 세션 상태 준비
+if "chat_dialog" not in st.session_state:
+    st.session_state.chat_dialog = []   # [{'role':'user'|'assistant','content':str}]
+
+# 상단 툴바: 대화 초기화 + 음성 재생 체크박스
+col_a, col_b, col_c = st.columns([1, 1, 8])
+with col_a:
+    if st.button("대화 초기화", key="btn_clear_chat", use_container_width=True):
+        st.session_state.chat_dialog = []
+        # ask_llm 내부 history를 같이 쓰신다면 아래도 함께 비우세요 (선택)
+        if "history" in st.session_state:
+            st.session_state.history = []
+        st.toast("대화가 초기화되었습니다. 🧹")
+        (st.rerun if hasattr(st, "rerun") else st.experimental_rerun)()
+with col_b:
+    tts_chat = st.checkbox("챗봇 음성 응답", value=True)
+
+# 과거 대화 렌더 (최근이 아래로 내려오도록 순서대로 출력)
+if st.session_state.chat_dialog:
+    for msg in st.session_state.chat_dialog:
+        with st.chat_message("user" if msg["role"] == "user" else "assistant"):
+            st.markdown(msg["content"])
+
+# 입력 폼(텍스트 + 선택적 음성 입력)
+with st.form("chat_form", clear_on_submit=True):
+    user_text = st.text_input("질문을 입력하세요… (예: EUV와 DUV 차이)", key="chat_text")
+    use_mic   = st.checkbox("음성 입력 사용", value=False)
+    audio_chat_bytes = audio_recorder(text="녹음", key="chat_mic") if use_mic else None
+    submitted = st.form_submit_button("Send")
+
+# 제출 처리
+if submitted:
+    # 1) 음성 입력이 있고 텍스트가 비어있으면 음성부터 문자로 변환
+    if (not user_text or not user_text.strip()) and audio_chat_bytes:
+        try:
+            user_text = transcribe_audio_bytes(audio_chat_bytes) or ""
+        except Exception:
+            user_text = ""
+
+    if not user_text or not user_text.strip():
+        st.info("질문을 입력하거나 음성으로 말씀해 주세요.")
+    else:
+        # 2) 사용자 메시지 기록 및 표시
+        st.session_state.chat_dialog.append({"role": "user", "content": user_text})
+        with st.chat_message("user"):
+            st.markdown(user_text)
+
+        # 3) 최근 대화 맥락(간단) 구성
+        #   - 마지막 6개 메시지를 '사용자/도우미:' 형태로 합쳐 LLM에 컨텍스트로 전달
+        tail = st.session_state.chat_dialog[-12:]  # user/assistant 합쳐 최대 12개 = 최근 6턴
+        hist_lines = []
+        for m in tail:
+            role = "사용자" if m["role"] == "user" else "도우미"
+            hist_lines.append(f"{role}: {m['content']}")
+        hist_txt = "\n".join(hist_lines)
+
+        # 4) 이미지 선택(업로드/카메라) 포함
+        images = get_selected_images()
+
+        # 5) 프롬프트 구성 → ask_llm 호출
+        #    (LLM.py의 SYSTEM_PROMPT가 적용되며, 여기서는 대화 맥락을 텍스트로 주입)
+        full_prompt = (
+            "아래의 최근 대화를 참고하여, 이어지는 사용자의 질문에 정중한 한국어(존댓말)로 답변해 주세요.\n\n"
+            f"[최근 대화]\n{hist_txt or '(이전 대화 없음)'}\n\n"
+            f"[질문]\n{user_text}"
+        )
+
+        with st.chat_message("assistant"):
             with st.spinner("응답 생성 중..."):
-                answer = ask_llm(user_text.strip(), images=images)
-            st.markdown("#### 답변")
+                answer = ask_llm(full_prompt, images=images)
+
             st.markdown(answer)
-            if tts_toggle:
+            # 6) 응답 저장
+            st.session_state.chat_dialog.append({"role": "assistant", "content": answer})
+
+            # 7) 음성 응답(선택)
+            if tts_chat:
                 fn = speak_text(answer)
                 if fn and os.path.exists(fn):
                     autoplay_audio_from_file(fn)
 
-# 대화 기록
-st.divider()
-st.subheader("대화 기록")
-if st.session_state.history:
-    for role, text in st.session_state.history[-40:]:
-        with st.chat_message("user" if role == "user" else "assistant"):
-            st.markdown(text)
-else:
-    st.caption("아직 대화가 없습니다.")
-# ===== UI 끝 =====

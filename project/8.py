@@ -1,5 +1,6 @@
 import os
 import streamlit as st
+import streamlit.components.v1 as components
 from LLM import (
     is_similar,
     get_llm_backend,
@@ -9,11 +10,19 @@ from LLM import (
     extract_questions,
     parse_mc_questions,
     parse_eval,
+    get_chat_llm,
+    get_llm_backend,
+    get_chat_llm,
+    hist_pairs,
+    hist_text,
+    summarize_docs
 )
 
 st.set_page_config(page_title="CMP", layout="wide")
 
 st.header("8) 평탄화 (CMP)")
+
+CATEGORY_NAME = "평탄화"
 
 st.subheader("개요")
 st.write("연마 패드와 슬러리를 사용해 표면을 평탄화하는 공정입니다.")
@@ -25,7 +34,7 @@ st.markdown("""
 """)
 
 st.subheader("프로세스(가로 스크롤 카드)")
-steps = ["Pad Conditioning", "Polish (Slurry)", "Endpoint Ctrl", "Clean", "Metrology"]
+steps = ["패드 컨디셔닝", "연마 (슬러리 사용)", "종점 제어", "세정", "계측 (메트롤로지)"]
 
 html = """
 <div style="overflow-x:auto; padding:6px 0;">
@@ -52,53 +61,228 @@ items = "".join(
 import streamlit.components.v1 as components
 components.html(html.format(items=items), height=120, scrolling=False)
 
-# ---------------- 질의응답 (RAG · 챗봇 UI) ----------------
+# =========================
+# 공정 단계 설명 + 진도 관리
+# =========================
+st.subheader("공정 단계 설명 및 진도 관리")
+
+# --- 단계 데이터 (CMP 공정) : 고정 id 사용 ---
+steps_data = [
+    {
+        "id": "cmp_pad_cond",
+        "name": "패드 컨디셔닝 (Pad Conditioning)",
+        "icon": "🧽",
+        "desc": """
+🧽 **설명: 패드 컨디셔닝 (Pad Conditioning)**
+
+CMP 공정의 시작 단계로, 패드 표면을 다이아몬드 컨디셔너로 긁어내어
+패드의 기공을 열어주고 연마 효율(Removal Rate, RR)을 안정화시킵니다.
+
+🔧 **주요 포인트**
+- 컨디셔닝 강도/시간이 RR에 큰 영향을 미침
+- 과도하면 스크래치 증가, 부족하면 글레이징(막힘) 발생
+- 슬러리 유입 경로 확보 및 표면 활성화가 목적
+
+🎯 핵심 요약:
+- Pad Conditioning은 CMP 공정 품질의 출발점
+- RR 안정화와 결함 방지를 동시에 달성해야 함
+"""
+    },
+    {
+        "id": "cmp_polish",
+        "name": "연마 (Polish - Slurry 사용)",
+        "icon": "🌀",
+        "desc": """
+🧴 **설명: 연마 (Polish with Slurry)**
+
+슬러리(Slurry)는 연마제(입자) + 화학 반응제가 섞인 용액으로,
+패드와 함께 웨이퍼 표면을 기계적·화학적으로 동시에 깎아냅니다.
+
+🔧 **주요 제어 인자**
+- 패드 종류 (경도, 기공률, 탄성)
+- 슬러리 조성 (pH, 산화제, 억제제)
+- 다운포스 (압력, psi 단위)
+- 상대속도 (Pad/Wafer 회전 속도)
+
+⚠️ **주의사항**
+- 다운포스 ↑ → RR ↑ but 디싱 위험
+- 속도 ↑ → 균일성 개선 but 스크래치 위험
+- 슬러리 농도/유량 안정화 필요
+
+🎯 핵심 요약:
+- CMP 제거률(RR)은 Pad/Slurry/압력/속도의 균형으로 제어
+"""
+    },
+    {
+        "id": "cmp_ep",
+        "name": "엔드포인트 제어 (Endpoint Control)",
+        "icon": "🎯",
+        "desc": """
+🔍 **설명: 엔드포인트 제어 (Endpoint Control)**
+
+연마 중 목표 두께 또는 특정 층이 드러났을 때, 
+과도 연마(Over-Polish)를 막고 균일성을 확보하기 위한 제어 단계입니다.
+
+📏 **측정 방식**
+- 광학 센서: 반사율 변화 감지
+- 전기적 센서: 금속 층 노출 시 전류/저항 변화
+- 토크/마찰 센서: 패드-웨이퍼 마찰력 변화 측정
+- 시간 기반 + 센서 결합: 안정적 엔드포인트 검출
+
+⚠️ **문제 예방**
+- 오버폴리시 → 라인 CD 손상, 두께 불량
+- 언더폴리시 → 절연/배선 잔류
+
+🎯 핵심 요약:
+- EP 제어는 수율을 좌우하는 안전장치
+- 센서+시간 융합 제어로 재현성 확보
+"""
+    },
+    {
+        "id": "cmp_clean",
+        "name": "세정 (Clean)",
+        "icon": "🧼",
+        "desc": """
+🧼 **설명: 세정 (Clean)**
+
+CMP 후 웨이퍼 표면에는 슬러리 입자, 화학 잔여물, 금속 이온 등이 남아있습니다.  
+이를 완벽히 제거하지 않으면 후속 공정에서 **결함, 오염, 신뢰성 문제**를 일으킵니다.
+
+🔧 **세정 방식**
+- DIW(초순수) 세정
+- 브러시 스크럽
+- 메가소닉 클리닝
+- 화학 세정 (산/염기)
+
+⚠️ **주의사항**
+- 과세정 → 표면 손상
+- 불충분 세정 → 파티클 잔류
+
+🎯 핵심 요약:
+- CMP 세정은 **오염 제거 = 수율 보증**
+- 클린룸 관리와 병행 필요
+"""
+    },
+    {
+        "id": "cmp_metrology",
+        "name": "계측 (Metrology)",
+        "icon": "📐",
+        "desc": """
+📏 **설명: 계측 (Metrology)**
+
+CMP 후 최종적으로 표면 상태와 두께, 평탄도를 측정하는 단계입니다.  
+이 결과는 다음 공정 진행 여부와 피드백 제어에 활용됩니다.
+
+🔧 **측정 항목**
+- 두께/평탄도: 엘립소미터, 옵틱 두께계
+- 결함: 광학 검사, SEM, AFM
+- 금속 배선: 저항 측정, 라인 CD 확인
+
+🎯 핵심 요약:
+- 계측은 CMP 품질 검증의 마지막 단계
+- 데이터는 공정 조건 보정에 필수
+"""
+    }
+]
+
+# --- 진도 상태 초기화/동기화 (id 기준으로 안전하게) ---
+ids = [s["id"] for s in steps_data]
+if "progress" not in st.session_state:
+    st.session_state.progress = {}
+for sid in ids:
+    st.session_state.progress.setdefault(sid, False)
+
+# --- 단계별 설명 + 체크박스 ---
+completed = 0
+for step in steps_data:
+    sid, name, icon = step["id"], step["name"], step["icon"]
+    with st.expander(f"{icon} {name}"):
+        st.write(step["desc"])
+        widget_key = f"done_{sid}"
+        checked = st.checkbox("이 단계 학습 완료",
+                              value=st.session_state.progress.get(sid, False),
+                              key=widget_key)
+        st.session_state.progress[sid] = checked
+        if checked:
+            completed += 1
+
+# --- 전체 진도율 ---
+total = len(steps_data)
+percent = int((completed / total) * 100) if total else 0
+st.progress(percent)
+st.caption(f"📘 학습 진도: {completed} / {total} 단계 완료 ({percent}%)")
+
+# ---------------- 질의응답 (RAG · 챗봇 UI · LLM.py 함수 사용) ----------------
 st.subheader("질의응답 (RAG · 챗봇)")
+
+# ── 질의응답 상단 툴바: 대화 초기화 버튼
+c1, c2 = st.columns([1, 9])
+with c1:
+    if st.button("대화 초기화", key="btn_clear_qa", use_container_width=True, help="질의응답 대화 내용 전체 삭제"):
+        # 대화 이력 비우기
+        st.session_state["chat_history"] = []
+
+        # (선택) 체인 재생성을 원하시면 아래 주석을 해제
+        # st.session_state.pop("qa_chain", None)
+        # st.session_state.pop("qa_mode", None)
+
+        # (선택) 요약 메모리 등을 쓰신다면 함께 초기화
+        # st.session_state.pop("MEMORY", None)
+
+        st.toast("질의응답 대화가 초기화되었습니다. 🧹")
+        (st.rerun if hasattr(st, "rerun") else st.experimental_rerun)()
+
 
 # 체인 준비
 if "vectorstore" not in st.session_state:
     st.info("임베딩 자료가 없습니다. 메인에서 PDF 업로드 → 임베딩 생성 후 이용하세요.")
 else:
     if "qa_chain" not in st.session_state:
-        backend = st.session_state.get("llm_backend", "openai")
-        model   = st.session_state.get("llm_model", "gpt-4o-mini")
+        # ⬇️ LLM.py의 함수로 백엔드/모델/LLM을 가져옵니다.
+        try:
+            backend, model = get_llm_backend()   # "openai" | "gemini", 모델 문자열
+        except Exception:
+            backend = st.session_state.get("llm_backend", "openai")
+            model   = st.session_state.get("llm_model", "gpt-4o-mini")
+
+        try:
+            llm = get_chat_llm(backend=backend, model=model, temperature=0.2)
+        except Exception as e:
+            st.error(f"LLM 초기화 실패: {e}")
+            llm = None
+
         retriever = st.session_state.vectorstore.as_retriever(search_kwargs={"k": 4})
 
-        if backend == "openai":
-            try:
-                from langchain_openai import ChatOpenAI
-                llm = ChatOpenAI(model=model, temperature=0.2)
-            except Exception:
-                try:
-                    from openai import OpenAI
-                    _client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY",""))
-                    class _OpenAILLM:
-                        def invoke(self, prompt):
-                            r = _client.chat.completions.create(
-                                model=model,
-                                messages=[{"role":"user","content":prompt}],
-                                temperature=0.2
-                            )
-                            class _R: pass
-                            _R.content = r.choices[0].message.content
-                            return _R()
-                    llm = _OpenAILLM()
-                except Exception as e:
-                    st.error(f"OpenAI 사용 불가: {e}")
-                    llm = None
-        else:
-            try:
-                from langchain_community.chat_models import ChatOllama
-                llm = ChatOllama(model=model, temperature=0.2)
-            except Exception as e:
-                st.error(f"Ollama 사용 불가: {e}")
-                llm = None
+        # 메모리 지원 체인 구성: CRC 우선, 실패 시 수동 RAG 폴백용 상태 저장
+        st.session_state.retriever = retriever
+        st.session_state.llm = llm
+        st.session_state.qa_mode = "manual"   # 기본 수동, CRC 되면 "crc"로 변경
 
         if llm is not None:
-            from langchain.chains import RetrievalQA
-            st.session_state.qa_chain = RetrievalQA.from_chain_type(
-                llm=llm, chain_type="stuff", retriever=retriever, return_source_documents=True
-            )
+            try:
+                # ▼ CRC 시도 (이전 대화 맥락을 직접 넘길 수 있음)
+                from langchain.chains import ConversationalRetrievalChain
+                from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
+
+                prompt = ChatPromptTemplate.from_messages([
+                    ("system",
+                     "당신의 1차 정보원은 업로드된 PDF입니다. "
+                     "가능하면 PDF 근거를 우선하여 답하고, 부족하면 일반지식으로 보완하되 그 사실을 한 문장으로 표시하십시오. "
+                     "항상 정중한 한국어(존댓말)로 답하십시오."),
+                    MessagesPlaceholder(variable_name="chat_history"),
+                    ("human", "{question}")
+                ])
+
+                st.session_state.qa_chain = ConversationalRetrievalChain.from_llm(
+                    llm=llm,
+                    retriever=retriever,
+                    return_source_documents=True,
+                    combine_docs_chain_kwargs={"prompt": prompt},
+                )
+                st.session_state.qa_mode = "crc"
+            except Exception:
+                # CRC 불가(비호환 LLM 등) → 수동 RAG로 처리
+                st.session_state.qa_chain = None
 
     # 채팅 내역 초기화
     if "chat_history" not in st.session_state:
@@ -127,20 +311,28 @@ else:
                         for i, meta in enumerate(msg["sources"], 1):
                             st.caption(f"{i}. {meta}")
 
-    # 입력창
-    user_q = st.chat_input("질문을 입력하세요… (예: EUV와 DUV 차이)")
-    if user_q:
+    # ===== 입력창 =====
+    with st.form("qa_form", clear_on_submit=True):
+        user_q = st.text_input("질문을 입력하세요… (예: EUV와 DUV 차이)", key="qa_text")
+        submitted = st.form_submit_button("Send")
+
+    # ✅ 버튼을 눌렀고 비어 있지 않을 때만 생성
+    if submitted and user_q and user_q.strip():
         # 1) 사용자 메시지 기록 & 표시
-        st.session_state.chat_history.append({"role":"user", "content":user_q})
+        st.session_state.chat_history.append({"role": "user", "content": user_q})
         with st.chat_message("user"):
             st.markdown(user_q)
-
         # 2) 응답 생성
-        if "qa_chain" in st.session_state and st.session_state.qa_chain is not None:
+        if st.session_state.get("qa_mode") == "crc" and st.session_state.get("qa_chain") is not None:
+            # ---- CRC 경로: 대화 맥락을 chat_history 인자로 직접 전달
             with st.chat_message("assistant"):
                 with st.status("검색 및 응답 생성 중...", expanded=False):
-                    out = st.session_state.qa_chain({"query": user_q})
-                answer = out.get("result", "정보가 부족합니다")
+                    out = st.session_state.qa_chain({
+                        "question": user_q,
+                        "chat_history": hist_pairs(st.session_state.chat_history, limit_pairs=6)  # ← LLM.py 함수
+                    })
+
+                answer = out.get("answer") or out.get("result") or "정보가 부족합니다"
                 st.markdown(answer)
 
                 # 출처 요약
@@ -154,10 +346,67 @@ else:
                             st.caption(f"{i}. {meta}")
                 # 히스토리 저장(출처 포함)
                 st.session_state.chat_history.append({"role":"assistant", "content":answer, "sources":srcs})
+
         else:
+            # ---- 수동 RAG 폴백: 문서 검색 + 대화맥락/발췌를 직접 프롬프트에 주입
             with st.chat_message("assistant"):
-                st.markdown("정보가 부족합니다")
-                st.session_state.chat_history.append({"role":"assistant", "content":"정보가 부족합니다"})
+                with st.status("검색 및 응답 생성 중...", expanded=False):
+                    llm = st.session_state.get("llm", None)
+                    retriever = st.session_state.get("retriever", None)
+
+                    docs = []
+                    if retriever is not None:
+                        try:
+                            docs = retriever.get_relevant_documents(user_q)
+                        except Exception:
+                            docs = []
+
+                    hist_txt = hist_text(st.session_state.chat_history, limit_pairs=6)  # ← LLM.py 함수
+                    doc_block = summarize_docs(docs, max_chars=2400)                  # ← LLM.py 함수
+
+                    if doc_block:
+                        prompt = (
+                            "규칙:\n"
+                            "1) 아래 [PDF 발췌]에서 먼저 근거를 찾고 답하십시오.\n"
+                            "2) 충분한 근거가 없으면 일반지식으로 보완하고, 그 사실을 한 문장으로 표시하십시오.\n"
+                            "3) 한국어(존댓말)로 간결하고 정확히 답하십시오.\n\n"
+                            f"[대화 맥락]\n{hist_txt or '(이전 대화 없음)'}\n\n"
+                            f"[PDF 발췌]\n{doc_block}\n\n"
+                            f"[질문]\n{user_q}\n"
+                        )
+                    else:
+                        prompt = (
+                            "다음은 최근 대화입니다.\n"
+                            f"{hist_txt or '(이전 대화 없음)'}\n\n"
+                            "업로드된 PDF에서 충분한 근거를 찾지 못했습니다. 일반지식으로 답하되, "
+                            "모호하면 '정보가 부족합니다'라고 밝혀주십시오. 한국어(존댓말)로 답하십시오.\n"
+                            f"[질문] {user_q}"
+                        )
+
+                    if llm is None:
+                        answer = "정확히 알 수 없습니다."
+                    else:
+                        try:
+                            out = llm.invoke(prompt)
+                            answer = getattr(out, "content", None) or getattr(out, "text", None) or "정보가 부족합니다"
+                        except Exception:
+                            answer = "정확히 알 수 없습니다."
+
+                st.markdown(answer)
+
+                # 출처 요약(수동 경로)
+                srcs = []
+                for sdoc in (docs or []):
+                    meta = getattr(sdoc, "metadata", {}) or {}
+                    srcs.append(f"{meta.get('source','파일')} p.{meta.get('page','?')}")
+                if srcs:
+                    with st.popover("출처 보기"):
+                        for i, meta in enumerate(srcs, 1):
+                            st.caption(f"{i}. {meta}")
+
+                # 히스토리 저장(출처 포함)
+                st.session_state.chat_history.append({"role":"assistant", "content":answer, "sources":srcs})
+
 
 # ---------------- 랜덤 문제 생성기 + 채점 ----------------
 st.subheader("랜덤 문제 생성기")
