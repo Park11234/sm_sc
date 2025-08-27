@@ -1,20 +1,15 @@
 import os
-import re
-
-import tempfile
-from typing import List
 import streamlit as st
-
-# LangChain / Vector DB
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_community.vectorstores import FAISS
-from langchain_community.document_loaders import PyPDFLoader
-
-# =============================================
-# File: pages/2_식각.py
-# =============================================
-import streamlit as st
-from langchain.chains import RetrievalQA
+from LLM import (
+    is_similar,
+    get_llm_backend,
+    generate_with_openai,
+    generate_with_gemini,
+    gather_context,
+    extract_questions,
+    parse_mc_questions,
+    parse_eval,
+)
 
 st.set_page_config(page_title="식각", layout="wide")
 
@@ -29,50 +24,144 @@ st.markdown("""
 - 엔드포인트 검출, 손상/리디포지션 최소화
 """)
 
-st.subheader("프로세스 다이어그램")
+st.subheader("프로세스(가로 스크롤 카드)")
 steps = ["Mask Pattern", "Etch (RIE/ICP)", "Endpoint Detect", "Resist Strip", "Clean"]
-st.graphviz_chart("\n".join([
-    "digraph G {",
-    "rankdir=LR;",
-    "node [shape=box, style=rounded, fontsize=12];",
-    *[f"n{i} [label=\"{s}\"];" for i, s in enumerate(steps)],
-    *[f"n{i} -> n{i + 1};" for i in range(len(steps) - 1)],
-    "}",
-]), use_container_width=True)
 
-st.subheader("질의응답 (RAG)")
+html = """
+<div style="overflow-x:auto; padding:6px 0;">
+  <div style="display:flex; gap:12px; align-items:center; min-height:96px;">
+    {items}
+  </div>
+</div>
+"""
+chip = """
+<div style="flex:0 0 auto; min-width:160px; max-width:220px;
+            padding:12px 14px; border:1.5px solid #d0d4dc; border-radius:14px;
+            box-shadow:0 1px 3px rgba(0,0,0,0.06); background:#fff; text-align:center;">
+  <div style="font-size:14px; font-weight:600;">{label}</div>
+</div>
+<div style="flex:0 0 auto; font-size:20px; margin:0 2px;">➜</div>
+"""
+
+items = "".join(
+    (chip.format(label=s) if i < len(steps)-1
+     else chip.replace('<div style="flex:0 0 auto; font-size:20px; margin:0 2px;">➜</div>', '').format(label=s))
+    for i, s in enumerate(steps)
+)
+
+import streamlit.components.v1 as components
+components.html(html.format(items=items), height=120, scrolling=False)
+
+# ---------------- 질의응답 (RAG · 챗봇 UI) ----------------
+st.subheader("질의응답 (RAG · 챗봇)")
+
+# 체인 준비
 if "vectorstore" not in st.session_state:
-    st.info("메인에서 임베딩을 먼저 생성하세요.")
+    st.info("임베딩 자료가 없습니다. 메인에서 PDF 업로드 → 임베딩 생성 후 이용하세요.")
 else:
     if "qa_chain" not in st.session_state:
         backend = st.session_state.get("llm_backend", "openai")
-        model = st.session_state.get("llm_model", "gpt-4o-mini")
+        model   = st.session_state.get("llm_model", "gpt-4o-mini")
         retriever = st.session_state.vectorstore.as_retriever(search_kwargs={"k": 4})
+
         if backend == "openai":
-            from langchain_openai import ChatOpenAI
-
-            llm = ChatOpenAI(model=model, temperature=0.2)
+            try:
+                from langchain_openai import ChatOpenAI
+                llm = ChatOpenAI(model=model, temperature=0.2)
+            except Exception:
+                try:
+                    from openai import OpenAI
+                    _client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY",""))
+                    class _OpenAILLM:
+                        def invoke(self, prompt):
+                            r = _client.chat.completions.create(
+                                model=model,
+                                messages=[{"role":"user","content":prompt}],
+                                temperature=0.2
+                            )
+                            class _R: pass
+                            _R.content = r.choices[0].message.content
+                            return _R()
+                    llm = _OpenAILLM()
+                except Exception as e:
+                    st.error(f"OpenAI 사용 불가: {e}")
+                    llm = None
         else:
-            from langchain_community.chat_models import ChatOllama
+            try:
+                from langchain_community.chat_models import ChatOllama
+                llm = ChatOllama(model=model, temperature=0.2)
+            except Exception as e:
+                st.error(f"Ollama 사용 불가: {e}")
+                llm = None
 
-            llm = ChatOllama(model=model, temperature=0.2)
-        st.session_state.qa_chain = RetrievalQA.from_chain_type(llm=llm, chain_type="stuff", retriever=retriever,
-                                                                return_source_documents=True)
+        if llm is not None:
+            from langchain.chains import RetrievalQA
+            st.session_state.qa_chain = RetrievalQA.from_chain_type(
+                llm=llm, chain_type="stuff", retriever=retriever, return_source_documents=True
+            )
 
-    q = st.text_input("질문을 입력하세요", placeholder="예: 선택비 정의")
-    if st.button("질문하기", use_container_width=True):
-        if q.strip():
-            out = st.session_state.qa_chain({"query": q})
-            st.markdown("### 답변")
-            st.write(out.get("result", "정보가 부족합니다"))
-            for i, s in enumerate(out.get("source_documents", []), 1):
-                meta = s.metadata or {}
-                st.caption(f"{i}. {meta.get('source', '파일')} p.{meta.get('page', '?')}")
+    # 채팅 내역 초기화
+    if "chat_history" not in st.session_state:
+        st.session_state.chat_history = []   # [{'role':'user'|'assistant', 'content': str, 'sources': list}]
+
+    # 과거 채팅 표시 (최근 2개만 기본, 나머지는 펼쳐서 보기)
+    if st.session_state.chat_history:
+        older = st.session_state.chat_history[:-2]
+        recent = st.session_state.chat_history[-2:]
+
+        if older:
+            with st.expander(f"이전 대화 보기 ({len(older)}개)", expanded=False):
+                for msg in older:
+                    with st.chat_message("user" if msg["role"]=="user" else "assistant"):
+                        st.markdown(msg["content"])
+                        if msg.get("sources"):
+                            with st.popover("출처 보기"):
+                                for i, meta in enumerate(msg["sources"], 1):
+                                    st.caption(f"{i}. {meta}")
+
+        for msg in recent:
+            with st.chat_message("user" if msg["role"]=="user" else "assistant"):
+                st.markdown(msg["content"])
+                if msg.get("sources"):
+                    with st.popover("출처 보기"):
+                        for i, meta in enumerate(msg["sources"], 1):
+                            st.caption(f"{i}. {meta}")
+
+    # 입력창
+    user_q = st.chat_input("질문을 입력하세요… (예: EUV와 DUV 차이)")
+    if user_q:
+        # 1) 사용자 메시지 기록 & 표시
+        st.session_state.chat_history.append({"role":"user", "content":user_q})
+        with st.chat_message("user"):
+            st.markdown(user_q)
+
+        # 2) 응답 생성
+        if "qa_chain" in st.session_state and st.session_state.qa_chain is not None:
+            with st.chat_message("assistant"):
+                with st.status("검색 및 응답 생성 중...", expanded=False):
+                    out = st.session_state.qa_chain({"query": user_q})
+                answer = out.get("result", "정보가 부족합니다")
+                st.markdown(answer)
+
+                # 출처 요약
+                srcs = []
+                for sdoc in (out.get("source_documents") or []):
+                    meta = sdoc.metadata or {}
+                    srcs.append(f"{meta.get('source','파일')} p.{meta.get('page','?')}")
+                if srcs:
+                    with st.popover("출처 보기"):
+                        for i, meta in enumerate(srcs, 1):
+                            st.caption(f"{i}. {meta}")
+                # 히스토리 저장(출처 포함)
+                st.session_state.chat_history.append({"role":"assistant", "content":answer, "sources":srcs})
         else:
-            st.warning("질문을 입력하세요.")
+            with st.chat_message("assistant"):
+                st.markdown("정보가 부족합니다")
+                st.session_state.chat_history.append({"role":"assistant", "content":"정보가 부족합니다"})
+
 # ---------------- 랜덤 문제 생성기 + 채점 ----------------
 st.subheader("랜덤 문제 생성기")
-CATEGORY_NAME = "식각"  # ← 페이지 주제명
+CATEGORY_NAME = "포토리소그래피"  # ← 페이지 주제명
 
 # (중복 회피용 히스토리)
 hist_key = f"{CATEGORY_NAME}_quiz_history"
@@ -81,88 +170,26 @@ if hist_key not in st.session_state:
 
 # 설정
 cols = st.columns(3)
-# ✅ 난이도 두 가지만
 difficulty   = cols[0].selectbox(
     "난이도",
     ["초급", "고급"],
     index=0,
-    key=f"{CATEGORY_NAME}_difficulty"      # ← 고유 key 추가
+    key=f"{CATEGORY_NAME}_difficulty"
 )
 n_items      = cols[1].selectbox(
     "문항 수",
     [1, 3, 5],
     index=1,
-    key=f"{CATEGORY_NAME}_n_items"         # ← 고유 key 추가
+    key=f"{CATEGORY_NAME}_n_items"
 )
 has_vs       = "vectorstore" in st.session_state
 with_context = cols[2].checkbox(
     "업로드 문서 기반(권장)",
     has_vs,
-    key=f"{CATEGORY_NAME}_with_context"    # ← 고유 key 추가(권장)
+    key=f"{CATEGORY_NAME}_with_context"
 )
 
-# LLM 헬퍼 (기존과 동일)
-def _get_llm_backend():
-    return st.session_state.get("llm_backend", "openai"), st.session_state.get("llm_model", "gpt-4o")
-
-def _generate_with_openai(prompt: str, model_name: str) -> str:
-    try:
-        from langchain_openai import ChatOpenAI
-        llm = ChatOpenAI(model=model_name, temperature=0)
-        return llm.invoke(prompt).content
-    except Exception:
-        try:
-            from openai import OpenAI
-            client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY", ""))
-            resp = client.chat.completions.create(
-                model=model_name,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0,
-            )
-            return resp.choices[0].message.content
-        except Exception as e:
-            return f"__GEN_ERROR__ {e}"
-
-def _generate_with_gemini(prompt: str, model_name: str) -> str:
-    try:
-        from langchain_google_genai import ChatGoogleGenerativeAI
-        llm = ChatGoogleGenerativeAI(model=model_name, temperature=0)
-        return llm.invoke(prompt).content
-    except Exception:
-        try:
-            import google.generativeai as genai
-            genai.configure(api_key=os.environ.get("GOOGLE_API_KEY", ""))
-            model = genai.GenerativeModel(model_name)
-            resp = model.generate_content(prompt)
-            return resp.text
-        except Exception as e:
-            return f"__GEN_ERROR__ {e}"
-
-def _gather_context(k: int = 6) -> str:
-    if not has_vs or not with_context:
-        return ""
-    try:
-        retriever = st.session_state.vectorstore.as_retriever(search_kwargs={"k": k})
-        docs = retriever.get_relevant_documents(f"{CATEGORY_NAME} 핵심 개념 요약")
-        return "\n\n".join(d.page_content for d in docs)[:6000]
-    except Exception:
-        return ""
-
-# ----- 공통: 서술형 추출기 (고급용)
-def _extract_questions(s: str, expected_n: int) -> list[str]:
-    s = (s or "").strip()
-    if not s:
-        return []
-    parts = re.split(r'^\s*\d+[\.\)\]]\s+', s, flags=re.M)
-    parts = [p.strip() for p in parts if p.strip()]
-    if len(parts) <= 1:
-        parts = [p.strip() for p in re.split(r'\n\s*\n+', s) if p.strip()]
-    if len(parts) <= 1:
-        lines = [ln.strip() for ln in s.splitlines() if ln.strip()]
-        parts = [(" ".join(lines))] if lines else []
-    return parts[:expected_n]
-
-# ----- 초급(MC) 전용: 생성 템플릿 & 파서
+# 프롬프트 템플릿 (변수)
 QUIZ_PROMPT_MC = """\
 당신은 반도체 공정 과목의 교수입니다.
 주제: {category}
@@ -185,59 +212,8 @@ C) 보기 C
 D) 보기 D
 정답: A
 해설: 한두 문장 설명
-
 """
 
-def _parse_mc_questions(s: str, expected_n: int):
-    """LLM 출력에서 객관식 문항을 구조화하여 [ {q:str, opts:list[A..D], answer:'A'..'D', expl:str}, ... ] 로 반환"""
-    blocks = re.split(r'^\s*\d+\)\s+', s.strip(), flags=re.M)
-    items = []
-    for blk in blocks:
-        blk = blk.strip()
-        if not blk:
-            continue
-        lines = [ln.strip() for ln in blk.splitlines() if ln.strip()]
-        # 질문: 보기 시작 전 줄들 합치기
-        q_lines = []
-        opts = {'A': None, 'B': None, 'C': None, 'D': None}
-        ans = None
-        expl = ""
-        phase = "q"
-        for ln in lines:
-            m_opt = re.match(r'^([ABCD])[)\.]\s*(.+)$', ln, flags=re.I)
-            if m_opt:
-                phase = "opt"
-                key = m_opt.group(1).upper()
-                opts[key] = m_opt.group(2).strip()
-                continue
-            m_ans = re.match(r'^정답\s*:\s*([ABCD])\s*$', ln, flags=re.I)
-            if m_ans:
-                ans = m_ans.group(1).upper()
-                phase = "ans"
-                continue
-            m_ex = re.match(r'^해설\s*:\s*(.*)$', ln, flags=re.I)
-            if m_ex:
-                expl = m_ex.group(1).strip()
-                phase = "expl"
-                continue
-            if phase == "q":
-                q_lines.append(ln)
-            elif phase == "expl":
-                expl += (" " + ln)
-            # 나머지는 무시
-        qtext = " ".join(q_lines).strip()
-        if qtext and all(opts[k] for k in ['A','B','C','D']) and ans in 'ABCD':
-            items.append({
-                "q": qtext,
-                "opts": [f"A) {opts['A']}", f"B) {opts['B']}", f"C) {opts['C']}", f"D) {opts['D']}"],
-                "answer": ans,
-                "expl": expl.strip()
-            })
-        if len(items) >= expected_n:
-            break
-    return items
-
-# ----- 고급(서술형) 템플릿
 QUIZ_PROMPT_TXT = """\
 당신은 반도체 공정 과목의 교수입니다.
 주제: {category}
@@ -251,7 +227,6 @@ QUIZ_PROMPT_TXT = """\
 답은 포함하지 마세요.
 """
 
-# ----- 채점 템플릿(서술형용, 기존 유지)
 EVAL_PROMPT_TMPL = """\
 당신은 {category} 분야의 채점 보조입니다.
 다음 문항과 수험자 답안을 평가하세요.
@@ -274,16 +249,15 @@ EVAL_PROMPT_TMPL = """\
 피드백: <두세 문장 피드백>
 """
 
-# ----- 문제 생성 -----
+# 문제 생성 버튼 동작
 if st.button("랜덤 문제 생성", use_container_width=True):
-    # 진행표시가 사라지도록 플레이스홀더
     ph = st.empty()
     with ph.container():
         if hasattr(st, "status"):
             with st.status("문제 생성 중...", expanded=True) as status:
                 status.update(label="컨텍스트 수집...", state="running")
-                backend, model = _get_llm_backend()
-                context = _gather_context()
+                backend, model = get_llm_backend()
+                context = gather_context(k=6, enabled=with_context, retriever=st.session_state.vectorstore.as_retriever(search_kwargs={"k": 6}) if has_vs else None)
 
                 status.update(label="프롬프트 구성...", state="running")
                 if difficulty == "초급":
@@ -300,22 +274,21 @@ if st.button("랜덤 문제 생성", use_container_width=True):
                     )
 
                 status.update(label="문항 생성 요청...", state="running")
-                raw = _generate_with_openai(prompt, model) if backend == "openai" else _generate_with_gemini(prompt, model)
+                raw = generate_with_openai(prompt, model) if backend == "openai" else generate_with_gemini(prompt, model)
 
                 prev_texts = [p if isinstance(p, str) else p.get("q","") for p in st.session_state[hist_key]]
 
                 if difficulty == "초급":
-                    cand = _parse_mc_questions(raw, n_items)
+                    cand = parse_mc_questions(raw, n_items)
                     uniques = []
                     for item in cand:
                         if not any(is_similar(item["q"], pt) for pt in prev_texts):
                             uniques.append(item)
-                    # 부족 시 보강 1회
                     if len(uniques) < n_items:
                         need = n_items - len(uniques)
                         status.update(label=f"보강 생성 ({need}개)...", state="running")
-                        raw2 = _generate_with_openai(prompt, model) if backend == "openai" else _generate_with_gemini(prompt, model)
-                        cand2 = _parse_mc_questions(raw2, need)
+                        raw2 = generate_with_openai(prompt, model) if backend == "openai" else generate_with_gemini(prompt, model)
+                        cand2 = parse_mc_questions(raw2, need)
                         for it in cand2:
                             if len(uniques) >= n_items: break
                             if not any(is_similar(it["q"], pt) for pt in (prev_texts + [u["q"] for u in uniques])):
@@ -326,7 +299,7 @@ if st.button("랜덤 문제 생성", use_container_width=True):
                     st.session_state[hist_key].extend([u["q"] for u in uniques])
 
                 else:  # 고급(서술형)
-                    cand = _extract_questions(raw, n_items)
+                    cand = extract_questions(raw, n_items)
                     uniques = []
                     for q in cand:
                         if not any(is_similar(q, pt) for pt in prev_texts):
@@ -334,8 +307,8 @@ if st.button("랜덤 문제 생성", use_container_width=True):
                     if len(uniques) < n_items:
                         need = n_items - len(uniques)
                         status.update(label=f"보강 생성 ({need}개)...", state="running")
-                        raw2 = _generate_with_openai(prompt, model) if backend == "openai" else _generate_with_gemini(prompt, model)
-                        cand2 = _extract_questions(raw2, need)
+                        raw2 = generate_with_openai(prompt, model) if backend == "openai" else generate_with_gemini(prompt, model)
+                        cand2 = extract_questions(raw2, need)
                         for q in cand2:
                             if len(uniques) >= n_items: break
                             if not any(is_similar(q, pt) for pt in (prev_texts + uniques)):
@@ -347,24 +320,23 @@ if st.button("랜덤 문제 생성", use_container_width=True):
 
                 status.update(label="완료 ✅", state="complete")
         else:
-            # st.status 없는 구버전 호환: 간단 진행바
             bar = st.progress(0)
-            backend, model = _get_llm_backend()
-            context = _gather_context(); bar.progress(20)
+            backend, model = get_llm_backend(); bar.progress(10)
+            context = gather_context(k=6, enabled=with_context, retriever=st.session_state.vectorstore.as_retriever(search_kwargs={"k": 6}) if has_vs else None); bar.progress(20)
             if difficulty == "초급":
                 prompt = QUIZ_PROMPT_MC.format(category=CATEGORY_NAME, n_items=n_items, context=(f"[컨텍스트]\n{context}" if context else "(컨텍스트 없음)"))
             else:
                 prompt = QUIZ_PROMPT_TXT.format(category=CATEGORY_NAME, n_items=n_items, context=(f"[컨텍스트]\n{context}" if context else "(컨텍스트 없음)"))
-            raw = _generate_with_openai(prompt, model) if backend == "openai" else _generate_with_gemini(prompt, model); bar.progress(60)
+            raw = generate_with_openai(prompt, model) if backend == "openai" else generate_with_gemini(prompt, model); bar.progress(60)
             prev_texts = [p if isinstance(p, str) else p.get("q","") for p in st.session_state[hist_key]]
             if difficulty == "초급":
-                cand = _parse_mc_questions(raw, n_items)
+                cand = parse_mc_questions(raw, n_items)
                 uniques = [it for it in cand if not any(is_similar(it["q"], pt) for pt in prev_texts)]
                 st.session_state[f"{CATEGORY_NAME}_quiz_items"] = uniques
                 st.session_state[f"{CATEGORY_NAME}_quiz_mode"]  = "초급"
                 st.session_state[hist_key].extend([u["q"] for u in uniques])
             else:
-                cand = _extract_questions(raw, n_items)
+                cand = extract_questions(raw, n_items)
                 uniques = [q for q in cand if not any(is_similar(q, pt) for pt in prev_texts)]
                 st.session_state[f"{CATEGORY_NAME}_quiz_items"] = uniques
                 st.session_state[f"{CATEGORY_NAME}_quiz_mode"]  = "고급"
@@ -380,7 +352,7 @@ if items:
     st.markdown("### 생성된 문제")
 
     if mode == "초급":
-        # 객관식 렌더링 (LLM 채점 불필요, 자체 정답 비교)
+        # 객관식 렌더링
         for i, it in enumerate(items, start=1):
             st.markdown(f"**{i}) {it['q']}**")
             key = f"{CATEGORY_NAME}_mc_{i-1}"
@@ -391,11 +363,7 @@ if items:
             for i, it in enumerate(items, start=1):
                 key = f"{CATEGORY_NAME}_mc_{i-1}"
                 sel = st.session_state.get(key)
-                # 선택값에서 A/B/C/D 추출
-                if sel:
-                    sel_letter = sel.split(")")[0]
-                else:
-                    sel_letter = None
+                sel_letter = sel.split(")")[0] if sel else None
                 correct = (sel_letter == it["answer"])
                 verdict = "정답" if correct else "오답"
                 st.markdown(f"**문항 #{i} 결과**")
@@ -403,7 +371,7 @@ if items:
                 st.markdown(f"피드백: {it.get('expl','(해설 없음)')}")
                 st.markdown("---")
     else:
-        # 서술형 렌더링 (기존 유지 + LLM 채점)
+        # 서술형 렌더링 (LLM 채점)
         for i, qtext in enumerate(items, start=1):
             st.markdown(f"**{i}) {qtext}**")
             st.text_area(
@@ -413,32 +381,9 @@ if items:
                 placeholder="여기에 본인 답안을 작성하세요."
             )
 
-        # 채점 출력 포맷 확정 (항상 줄바꿈)
-        def parse_eval(judged: str):
-            s = (judged or "").strip().replace("\r\n", "\n")
-            m_verdict = re.search(r"판정\s*:\s*(정답|오답)", s)
-            verdict = m_verdict.group(1) if m_verdict else None
-            m_feedback = re.search(r"피드백\s*:\s*(.*)", s, flags=re.S)
-            feedback = m_feedback.group(1).strip() if m_feedback else None
-            if not feedback and m_verdict:
-                tail = s.split(m_verdict.group(0), 1)[-1].strip()
-                if tail and not tail.lower().startswith("피드백"):
-                    feedback = tail
-            if not verdict:
-                if "정답" in s: verdict = "정답"
-                elif "오답" in s: verdict = "오답"
-            if not feedback:
-                feedback = ""
-            return verdict, feedback
-
-        def render_eval(judged: str):
-            verdict, feedback = parse_eval(judged)
-            st.markdown(f"**판정: {verdict or '판정 불명'}**")
-            st.markdown(f"피드백: {feedback or '(없음)'}")
-
         if st.button("채점하기", type="primary", use_container_width=True):
-            backend, model = _get_llm_backend()
-            context = _gather_context()
+            backend, model = get_llm_backend()
+            context = gather_context(k=6, enabled=with_context, retriever=st.session_state.vectorstore.as_retriever(search_kwargs={"k": 6}) if has_vs else None)
             results = []
             for i, qtext in enumerate(items):
                 ans = st.session_state.get(f"{CATEGORY_NAME}_ans_{i}", "").strip()
@@ -448,14 +393,17 @@ if items:
                     answer=ans if ans else "(무응답)",
                     context=(f"[컨텍스트]\n{context}" if context else "(컨텍스트 없음)")
                 )
-                judged = _generate_with_openai(eval_prompt, model) if backend == "openai" else _generate_with_gemini(eval_prompt, model)
+                judged = generate_with_openai(eval_prompt, model) if backend == "openai" else generate_with_gemini(eval_prompt, model)
                 results.append(judged)
 
             st.markdown("### 채점 결과")
             for i, judged in enumerate(results, start=1):
                 st.markdown(f"**문항 #{i} 결과**")
-                render_eval(judged)
+                v, fb = parse_eval(judged)
+                st.markdown(f"**판정: {v or '판정 불명'}**")
+                st.markdown(f"피드백: {fb or '(없음)'}")
                 st.markdown("---")
 else:
     st.caption("아직 생성된 문제가 없습니다. ‘랜덤 문제 생성’을 눌러주세요.")
+
 

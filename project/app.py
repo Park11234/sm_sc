@@ -1,8 +1,19 @@
-import os
-
 import streamlit as st
+from LLM import build_vectorstore_from_pdfs
 
+uploaded = st.sidebar.file_uploader("PDF 업로드 (여러 개)", type=["pdf"], accept_multiple_files=True)
+embed_backend = st.sidebar.selectbox("임베딩 백엔드", ["openai", "gemini"], index=0)
 
+if st.sidebar.button("임베딩 생성", use_container_width=True):
+    if not uploaded:
+        st.sidebar.warning("PDF를 먼저 업로드하세요.")
+    else:
+        try:
+            st.session_state.vectorstore = build_vectorstore_from_pdfs(uploaded, embed_backend)
+            st.sidebar.success("벡터스토어 생성 완료")
+            st.session_state.pop("qa_chain", None)
+        except Exception as e:
+            st.sidebar.error(f"임베딩 실패: {e}")
 
 page_main = st.Page("main.py", title="main Page", icon="📟")
 page_1 = st.Page("cate.py", title="목차", icon="📟")
