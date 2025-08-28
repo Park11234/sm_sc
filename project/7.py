@@ -45,8 +45,8 @@ st.markdown("""
 """, unsafe_allow_html=True)
 st.markdown("- 핵심 지표: 라인/비아 저항, 접촉저항 Rc, 공극/시임 결함, 배리어 연속성, 시드 커버리지, EM/SM 수명, 저유전막 손상, 평탄도")
 
-# 프로세스(가로 스크롤 카드)
-st.subheader("프로세스(가로 스크롤 카드)")
+# 프로세스(스크롤 카드)
+st.subheader("프로세스")
 steps = [
     "포토/식각(Trench/Via)",
     "배리어/라이너 증착",
@@ -87,8 +87,8 @@ steps_data = [
         "icon": "🧩",
         "desc": """
 🧩 **포토/식각(Trench/Via)**
-- **무엇을/왜**: Low-k 유전 막에 트렌치/비아를 형성해 라인·비아 경로를 만듭니다(싱글/더블 다마신).
-- **어떻게**: 하드마스크( SiCN/SiN ) 사용, 플라즈마 식각(예: Fluorocarbon)으로 ARDE 최소화, PR 스트립/플라즈마 폴리머 제거.
+- **식각 대상**: Low-k 유전 막에 트렌치/비아를 형성해 라인·비아 경로를 만듭니다(싱글/더블 다마신).
+- **방법**: 하드마스크( SiCN/SiN ) 사용, 플라즈마 식각(예: Fluorocarbon)으로 ARDE 최소화, PR 스트립/플라즈마 폴리머 제거.
 - **주의사항**
   - Low-k 플라즈마 손상/수분 흡수 → 유전율 상승·누설↑, **저손상 식각·세정** 필요.
   - 비아 바닥 **Stop 레이어** 노출 과소/과다 시 접촉저항 변동.
@@ -329,7 +329,7 @@ else:
             st.markdown(user_q)
         # 2) 응답 생성
         if st.session_state.get("qa_mode") == "crc" and st.session_state.get("qa_chain") is not None:
-            # ---- CRC 경로: 대화 맥락을 chat_history 인자로 직접 전달
+            # ---- CRC 경로: 대화 맥락을 chat_history 인자로 전달
             with st.chat_message("assistant"):
                 with st.status("검색 및 응답 생성 중...", expanded=False):
                     out = st.session_state.qa_chain({
@@ -349,7 +349,7 @@ else:
                     with st.popover("출처 보기"):
                         for i, meta in enumerate(srcs, 1):
                             st.caption(f"{i}. {meta}")
-                # 히스토리 저장(출처 포함)
+                # 히스토리 저장
                 st.session_state.chat_history.append({"role":"assistant", "content":answer, "sources":srcs})
 
         else:
@@ -418,7 +418,7 @@ else:
 st.subheader("랜덤 문제 생성기")
 CATEGORY_NAME = "포토리소그래피"  # ← 페이지 주제명
 
-# (중복 회피용 히스토리)
+# (중복 회피용)
 hist_key = f"{CATEGORY_NAME}_quiz_history"
 if hist_key not in st.session_state:
     st.session_state[hist_key] = []  # 문자열(서술형 질문) 또는 MC 질문 텍스트 저장
@@ -444,7 +444,7 @@ with_context = cols[2].checkbox(
     key=f"{CATEGORY_NAME}_with_context"
 )
 
-# 프롬프트 템플릿 (변수)
+# 질의응답 프롬프트
 QUIZ_PROMPT_MC = """\
 당신은 반도체 공정 과목의 교수입니다.
 주제: {category}

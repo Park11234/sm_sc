@@ -78,11 +78,11 @@ steps_data = [
         "desc": """
 🧼 **전처리 세정(Pre-clean)**
 
-**무엇을/왜**
+****왜 세정이 중요한가?****
 - 표면 유기물/금속 이온/파티클/수분 제거 → 초기 도핑 균일성, 접합 누설 저감.
 - 네이티브 산화막 상태 통일 → 표면 반응/주입 효율 재현성 향상.
 
-**어떻게**
+**세정 방법**
 - SC-1/SC-2로 유기물·금속 제거 → DIW 린스.
 - 필요 시 HF-last(희박 HF)로 얇은 산화막 제거 후 **신속 로딩**(재산화 억제).
 - 드라이(스핀/IPA/베이크)로 수분 제거.
@@ -251,7 +251,7 @@ with c1:
         (st.rerun if hasattr(st, "rerun") else st.experimental_rerun)()
 
 
-# 체인 준비
+# 체인임(수현아 헷갈리지마라)
 if "vectorstore" not in st.session_state:
     st.info("임베딩 자료가 없습니다. 메인에서 PDF 업로드 → 임베딩 생성 후 이용하세요.")
 else:

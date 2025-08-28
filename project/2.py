@@ -1,17 +1,13 @@
-import os
-
 import streamlit.components.v1 as components
 import streamlit as st
 from LLM import (
     is_similar,
-    get_llm_backend,
     generate_with_openai,
     generate_with_gemini,
     gather_context,
     extract_questions,
     parse_mc_questions,
     parse_eval,
-    get_chat_llm,
     get_llm_backend,
     get_chat_llm,
     hist_pairs,
@@ -75,10 +71,10 @@ items = "".join(
 )
 components.html(html.format(items=items), height=120, scrolling=False)
 
-# 공정 단계 설명 + 진도 관리
+# 공정 단계 설명
 st.subheader("공정 단계 설명 및 진도 관리")
 
-# 단계 데이터
+# 공정 정보
 steps_data = [
     {
         "name": "전처리 세정 (Pre-clean)",
