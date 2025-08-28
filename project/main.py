@@ -1,4 +1,3 @@
-
 import streamlit as st
 
 st.set_page_config(page_title="Main Page", page_icon="📘", layout="wide")
@@ -6,10 +5,8 @@ st.set_page_config(page_title="Main Page", page_icon="📘", layout="wide")
 st.title("Main Page")
 st.info("이동은 사이드바 네비게이션에서 해당 페이지를 선택해 주세요.")
 
-
 st.markdown("---")
 
-# 개요
 st.subheader("무엇을 할 수 있나요?")
 st.markdown(
 """
@@ -26,11 +23,10 @@ st.markdown(
 )
 
 st.markdown("---")
+st.subheader("페이지 안내")
 
 col1, col2 = st.columns(2)
 
-# 페이지 안내(설명 전용)
-st.subheader("페이지 안내")
 with col1:
     st.write(
         """
@@ -64,7 +60,6 @@ with col2:
 
 st.markdown("---")
 
-# 사용 흐름(간단)
 st.subheader("추천 사용 흐름")
 
 col1, col2 = st.columns(2)

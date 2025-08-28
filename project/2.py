@@ -83,7 +83,7 @@ steps_data = [
 🧼 **설명: 전처리 세정(Pre-clean)**
 
 - 목적: 포토 잔류물(PR scum), 용매, 수분, 파티클, 금속 이온 제거로 표면 활성화 및 식각 균일도 확보.
-- 방법: O₂ 플라즈마 애싱, 습식(리프트오프 레지듀 제거, 금속/유기물 세정), DIW 리ンス, 드라이 공정(탈수).
+- 방법: O₂ 플라즈마 애싱, 습식(리프트오프 레지듀 제거, 금속/유기물 세정), 드라이 공정(탈수).
 
 ⚠️ 주의:
 - 잔류 오염은 마이크로 마스킹 → 프로파일 불량·CD 편차·로스 증가.
@@ -171,7 +171,7 @@ steps_data = [
 
 # 페이지 진도 버킷
 PAGE_PROGRESS_KEY = f"{CATEGORY_NAME}_progress"
-# 과거 progress 키 제거
+
 st.session_state.pop("progress", None)
 
 if PAGE_PROGRESS_KEY not in st.session_state:
@@ -295,7 +295,7 @@ else:
         user_q = st.text_input("질문을 입력하세요… (예: EUV와 DUV 차이)", key="qa_text")
         submitted = st.form_submit_button("Send")
 
-    # ✅ 버튼을 눌렀고 비어 있지 않을 때만 생성
+    # 버튼을 눌렀고 비어 있지 않을 때만 생성
     if submitted and user_q and user_q.strip():
         # 1) 사용자 메시지 기록 & 표시
         st.session_state.chat_history.append({"role": "user", "content": user_q})
@@ -303,7 +303,7 @@ else:
             st.markdown(user_q)
         # 2) 응답 생성
         if st.session_state.get("qa_mode") == "crc" and st.session_state.get("qa_chain") is not None:
-            # ---- CRC 경로: 대화 맥락을 chat_history 인자로 직접 전달
+            # CRC 경로: 대화 맥락을 chat_history 인자로 직접 전달
             with st.chat_message("assistant"):
                 with st.status("검색 및 응답 생성 중...", expanded=False):
                     out = st.session_state.qa_chain({
@@ -383,13 +383,13 @@ else:
                         for i, meta in enumerate(srcs, 1):
                             st.caption(f"{i}. {meta}")
 
-                # 히스토리 저장(출처 포함)
+                # 히스토리 저장
                 st.session_state.chat_history.append({"role":"assistant", "content":answer, "sources":srcs})
 
 
-# 랜덤 문제 생성기 + 채점
+# 랜덤 문제 생성기  채점
 st.subheader("랜덤 문제 생성기")
-CATEGORY_NAME = "포토리소그래피"  # ← 페이지 주제명
+CATEGORY_NAME = "포토리소그래피"  #페이지 주제명
 
 # (중복 회피용)
 hist_key = f"{CATEGORY_NAME}_quiz_history"
@@ -417,7 +417,7 @@ with_context = cols[2].checkbox(
     key=f"{CATEGORY_NAME}_with_context"
 )
 
-# 프롬프트 템플릿
+# 프롬프트
 QUIZ_PROMPT_MC = """\
 당신은 반도체 공정 과목의 교수입니다.
 주제: {category}
@@ -572,7 +572,7 @@ if st.button("랜덤 문제 생성", use_container_width=True):
             bar.progress(100)
     ph.empty()
 
-# 문제 표시 + 답안 입력 / 채점
+# 문제 표시 답안 입력  채점
 items = st.session_state.get(f"{CATEGORY_NAME}_quiz_items", [])
 mode  = st.session_state.get(f"{CATEGORY_NAME}_quiz_mode", "고급")
 
@@ -633,5 +633,3 @@ if items:
                 st.markdown("---")
 else:
     st.caption("아직 생성된 문제가 없습니다. ‘랜덤 문제 생성’을 눌러주세요.")
-
-

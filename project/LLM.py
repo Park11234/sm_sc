@@ -1,6 +1,5 @@
-from __future__ import annotations  # ✅ 반드시 파일 최상단, 단 1회
+from __future__ import annotations
 
-# ── 표준 라이브러리
 import os
 import io
 import re
@@ -9,21 +8,19 @@ import difflib
 import tempfile
 from typing import List, Tuple, Optional, Iterable
 
-# ── 서드파티 기본
 import streamlit as st
 import streamlit.components.v1 as components
 from PIL import Image
 from faster_whisper import WhisperModel
 
-# ── 선택적 의존성 (설치 여부에 따라 플래그)
 try:
-    from langchain_openai import ChatOpenAI, OpenAIEmbeddings  # type: ignore
+    from langchain_openai import ChatOpenAI, OpenAIEmbeddings
     HAS_OPENAI = True
 except Exception:
     HAS_OPENAI = False
 
 try:
-    from langchain_google_genai import (  # type: ignore
+    from langchain_google_genai import (
         ChatGoogleGenerativeAI,
         GoogleGenerativeAIEmbeddings,
     )
@@ -32,25 +29,18 @@ except Exception:
     HAS_GEMINI = False
 
 try:
-    from openai import OpenAI as _OpenAIClient  # type: ignore
+    from openai import OpenAI as _OpenAIClient
     HAS_OPENAI_SDK = True
 except Exception:
     HAS_OPENAI_SDK = False
 
-# ── LangChain 공용 유틸
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_community.vectorstores import FAISS
-from langchain_community.document_loaders import PyPDFLoader
-
-# ── 환경 변수 (.env)
 from dotenv import load_dotenv, find_dotenv
 load_dotenv(find_dotenv(), override=False)
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
 
-# =========================
-# 1) 텍스트 전처리/유사도
-# =========================
+
+# 1) 텍스트 유사도
 _STOPWORDS: set[str] = {
     "the","a","an","of","and","to","in","port","on","for","with","by","at","from","is","are","was","were","be","as",
     "및","과","와","에서","으로","으로써","에","의","를","을","은","는","이다","한다","하는","또는",
@@ -78,9 +68,7 @@ def is_similar(q: str, p: str, jaccard_thr: float = 0.55, ratio_thr: float = 0.7
         return True
     return False
 
-# =========================
-# 2) PDF → VectorStore(FAISS)
-# =========================
+# PDF
 class OpenAIEmbeddingsLite:
     """langchain-openai 미설치 환경에서 OpenAI SDK로 임베딩 호출하는 폴백.
     LangChain Embeddings 인터페이스 호환: embed_documents, embed_query
@@ -107,7 +95,7 @@ class OpenAIEmbeddingsLite:
 
 
 def build_vectorstore_from_pdfs(
-    files: List,  # Streamlit UploadedFile 리스트 또는 파일-유사 객체 리스트
+    files: List,  # 리스트 유사 객체 리스트
     embed_backend: str = "openai",
 ):
     """PDF 파일들을 로드해 텍스트를 분할하고, 지정한 임베딩으로 FAISS 인덱스를 생성합니다.
@@ -156,9 +144,7 @@ def build_vectorstore_from_pdfs(
 
     return FAISS.from_documents(splits, embedding)
 
-# =========================
 # 3) DOT 파이프라인 문자열 생성
-# =========================
 
 def dot_pipeline(title: str, steps: List[str]) -> str:
     """Graphviz DOT 포맷으로 간단한 파이프라인 그래프를 만듭니다."""
@@ -175,9 +161,7 @@ def dot_pipeline(title: str, steps: List[str]) -> str:
     lines.append("}")
     return "\n".join(lines)
 
-# =========================
 # 4) LLM 백엔드 선택 (질의응답 등)
-# =========================
 
 def get_llm(backend: str = "openai", model: str = "gpt-4o-mini", temperature: float = 0.2):
     """LangChain Chat 인터페이스(.invoke) 호환 객체 반환.
@@ -191,7 +175,6 @@ def get_llm(backend: str = "openai", model: str = "gpt-4o-mini", temperature: fl
             return ChatOpenAI(model=model, temperature=temperature, openai_api_key=OPENAI_API_KEY)
         if not HAS_OPENAI_SDK:
             raise RuntimeError("OpenAI 사용 불가: `openai` 또는 `langchain-openai` 설치 필요")
-        # 폴백: OpenAI SDK 래퍼
         client = _OpenAIClient(api_key=OPENAI_API_KEY or os.getenv("OPENAI_API_KEY", ""))
 
         class _OpenAIChatLite:
@@ -220,7 +203,6 @@ def get_llm(backend: str = "openai", model: str = "gpt-4o-mini", temperature: fl
     raise RuntimeError("지원하는 LLM 백엔드는 'openai'와 'gemini' 뿐입니다.")
 
 
-# ===== 사용 예시 =====
 if __name__ == "__main__":
     # 1) 유사도 테스트
     a = "이온 주입 공정의 장단점을 설명하라"
@@ -239,9 +221,7 @@ if __name__ == "__main__":
     from langchain_openai import ChatOpenAI
     from langchain_core.messages import SystemMessage, HumanMessage
 
-# --------------------------------------------------------------------
 # 상수
-# --------------------------------------------------------------------
 APP_TITLE = "반도체 공정 Q&A"
 
 SYSTEM_PROMPT = (
@@ -254,9 +234,7 @@ SYSTEM_PROMPT = (
     "- 항상 정중한 한국어(존댓말)로 답변\n"
 )
 
-# --------------------------------------------------------------------
 # 세션 초기화
-# --------------------------------------------------------------------
 def init_session_state() -> None:
     """앱에서 사용되는 세션 키들을 초기화합니다."""
     if "history" not in st.session_state:
@@ -270,9 +248,7 @@ def init_session_state() -> None:
     if "use_camera_for_next" not in st.session_state:
         st.session_state.use_camera_for_next = False
 
-# --------------------------------------------------------------------
 # 유틸: 이미지 → data URL (비전 모델 입력용)
-# --------------------------------------------------------------------
 def pil_to_data_url(img: Image.Image, fmt: str = "PNG") -> str:
     """PIL 이미지를 data URL로 직렬화합니다."""
     buf = io.BytesIO()
@@ -281,9 +257,7 @@ def pil_to_data_url(img: Image.Image, fmt: str = "PNG") -> str:
     mime = "image/png" if fmt.upper() == "PNG" else "image/jpeg"
     return f"data:{mime};base64,{b64}"
 
-# --------------------------------------------------------------------
-# STT (Whisper)
-# --------------------------------------------------------------------
+# STT
 def load_whisper(model_size: str = "base") -> WhisperModel:
     """faster-whisper 모델 로드(기본: base)."""
     return WhisperModel(model_size, device="auto", compute_type="int8")
@@ -300,9 +274,7 @@ def transcribe_audio_bytes(audio_bytes: bytes, model_size: str = "base") -> str:
     text = " ".join(seg.text.strip() for seg in segments if getattr(seg, "text", ""))
     return text.strip()
 
-# --------------------------------------------------------------------
 # LLM
-# --------------------------------------------------------------------
 def get_llm(model_name: str = "gpt-4o-mini") -> ChatOpenAI:
     """LangChain ChatOpenAI 래퍼 생성."""
     return ChatOpenAI(model=model_name, temperature=0.2)
@@ -330,18 +302,15 @@ def ask_llm(query_text: str, images: Optional[List[Image.Image]] = None) -> str:
 
     return response.content
 
-# --------------------------------------------------------------------
 # TTS + 자동 재생
-# --------------------------------------------------------------------
 def speak_text(text: str, filename: str = "tts_output.mp3") -> Optional[str]:
-    """OpenAI TTS로 음성 파일 생성. 성공 시 파일 경로 반환."""
     api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key or openai is None:
         return None
     try:
         client = openai.OpenAI(api_key=api_key)
         resp = client.audio.speech.create(
-            model="gpt-4o-mini-tts",  # 환경에 따라 tts-1 계열로 변경 가능
+            model="gpt-4o-mini-tts",
             voice="alloy",
             input=text,
         )
@@ -352,7 +321,6 @@ def speak_text(text: str, filename: str = "tts_output.mp3") -> Optional[str]:
         return None
 
 def autoplay_audio_from_file(filepath: str) -> None:
-    """브라우저에서 자동 재생(HTML5 <audio>)"""
     try:
         with open(filepath, "rb") as f:
             data = f.read()
@@ -366,9 +334,7 @@ def autoplay_audio_from_file(filepath: str) -> None:
     except Exception:
         pass
 
-# --------------------------------------------------------------------
-# 헬퍼: 다음 질문에 포함할 이미지 선택(카메라, 업로드)
-# --------------------------------------------------------------------
+# 다음 질문에 포함할 이미지 선택(카메라, 업로드)
 def get_selected_images() -> List[Image.Image]:
     """체크 상태에 따라 업로드/카메라 이미지를 합쳐 반환."""
     selected: List[Image.Image] = []
@@ -404,14 +370,14 @@ except Exception:
     SystemMessage = None
     HumanMessage = None
 
-# Gemini (선택)
+# Gemini
 try:
     from langchain_google_genai import ChatGoogleGenerativeAI
     HAS_LANGCHAIN_GEMINI = True
 except Exception:
     HAS_LANGCHAIN_GEMINI = False
 
-# PDF→VectorStore(필요 시)
+# PDF→VectorStore
 try:
     from langchain.text_splitter import RecursiveCharacterTextSplitter
     from langchain_community.vectorstores import FAISS
@@ -421,7 +387,7 @@ except Exception:
     HAS_VS = False
 
 
-# ===================== 공용 상수 =====================
+# 공용 상수
 APP_TITLE = "반도체 공정 Q&A"
 SYSTEM_PROMPT = (
     "당신은 반도체 공정(포토, 식각, 증착, CMP, 이온주입, 확산, 열처리 등) 멘토입니다.\n"
@@ -433,7 +399,7 @@ SYSTEM_PROMPT = (
     "- 항상 정중한 한국어(존댓말)로 답변\n"
 )
 
-# ===================== 세션 초기화 =====================
+# 세션 초기화
 def init_session_state() -> None:
     if "history" not in st.session_state:
         st.session_state.history: List[Tuple[str, str]] = []
@@ -446,7 +412,7 @@ def init_session_state() -> None:
     if "use_camera_for_next" not in st.session_state:
         st.session_state.use_camera_for_next = False
 
-# ===================== 이미지 직렬화 =====================
+# 이미지 직렬화
 def pil_to_data_url(img: Image.Image, fmt: str = "PNG") -> str:
     buf = io.BytesIO()
     img.save(buf, format=fmt)
@@ -454,7 +420,7 @@ def pil_to_data_url(img: Image.Image, fmt: str = "PNG") -> str:
     mime = "image/png" if fmt.upper() == "PNG" else "image/jpeg"
     return f"data:{mime};base64,{b64}"
 
-# ===================== STT (Whisper) =====================
+#  STT
 def load_whisper(model_size: str = "base"):
     if not HAS_WHISPER:
         raise RuntimeError("faster-whisper가 필요합니다. `pip install faster-whisper`")
@@ -471,7 +437,7 @@ def transcribe_audio_bytes(audio_bytes: bytes, model_size: str = "base") -> str:
     text = " ".join(seg.text.strip() for seg in segments if getattr(seg, "text", ""))
     return text.strip()
 
-# ===================== 멀티모달 LLM =====================
+# 멀티모달 LLM
 def get_llm(model_name: str = "gpt-4o-mini"):
     if not HAS_LANGCHAIN_OPENAI:
         raise RuntimeError("langchain-openai 설치 필요: `pip install langchain-openai`")
@@ -495,7 +461,7 @@ def ask_llm(query_text: str, images: Optional[List[Image.Image]] = None) -> str:
     st.session_state.history.append(("assistant", response.content))
     return response.content
 
-# ===================== TTS + 자동 재생 =====================
+# TTS + 자동 재생
 def speak_text(text: str, filename: str = "tts_output.mp3") -> Optional[str]:
     api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key or not HAS_OPENAI_SDK:
@@ -527,7 +493,7 @@ def autoplay_audio_from_file(filepath: str) -> None:
     except Exception:
         pass
 
-# ===================== 이미지 선택 헬퍼 =====================
+# 이미지 선택 헬퍼
 def get_selected_images() -> List[Image.Image]:
     selected: List[Image.Image] = []
     if st.session_state.use_camera_for_next:
@@ -536,7 +502,7 @@ def get_selected_images() -> List[Image.Image]:
         selected.extend(st.session_state.upload_images)
     return selected
 
-# ===================== 유사도(중복 방지) =====================
+# 유사도(중복 방지)
 _STOPWORDS: set[str] = {
     "the","a","an","of","and","to","in","port","on","for","with","by","at","from","is","are","was","were","be","as",
     "및","과","와","에서","으로","으로써","에","의","를","을","은","는","이다","한다","하는","또는",
@@ -559,7 +525,7 @@ def is_similar(q: str, p: str, jaccard_thr: float = 0.55, ratio_thr: float = 0.7
         return True
     return False
 
-# ===================== 퀴즈/평가 유틸(포토리소그래피 페이지용) =====================
+# 퀴즈/평가 유틸(포토리소그래피 페이지용)
 def get_llm_backend():
     """세션에 저장한 백엔드/모델 읽기 (없으면 OpenAI/gpt-4o-mini)."""
     return st.session_state.get("llm_backend", "openai"), st.session_state.get("llm_model", "gpt-4o-mini")
@@ -697,7 +663,7 @@ def render_eval(judged: str):
     st.markdown(f"**판정: {verdict or '판정 불명'}**")
     st.markdown(f"피드백: {feedback or '(없음)'}")
 
-# ===================== (옵션) PDF→VectorStore =====================
+# PDF→VectorStore
 def build_vectorstore_from_pdfs(files: List, embed_backend: str = "openai"):
     """업로드된 PDF들로 FAISS 인덱스 생성 (필요 시 사용)."""
     if not HAS_VS:
@@ -766,7 +732,7 @@ def summarize_docs(docs, max_chars: int = 2400):
         if total >= max_chars:
             break
     return "\n\n".join(parts)
-# ================= get_chat_llm (OpenAI/Gemini 지원, LangChain ↔ SDK 폴백) =================
+# get_chat_llm (OpenAI/Gemini 지원, LangChain ↔ SDK 폴백)
 def get_chat_llm(backend: str = "openai", model: str = "gpt-4o-mini", temperature: float = 0.2):
     """
     반환값: .invoke(prompt)를 지원하는 객체
@@ -775,7 +741,7 @@ def get_chat_llm(backend: str = "openai", model: str = "gpt-4o-mini", temperatur
     """
     b = (backend or "openai").lower()
 
-    # ---------------- OpenAI ----------------
+    # OpenAI
     if b == "openai":
         # 1) LangChain 우선
         if 'HAS_LANGCHAIN_OPENAI' in globals() and HAS_LANGCHAIN_OPENAI and 'ChatOpenAI' in globals() and ChatOpenAI:
@@ -785,7 +751,7 @@ def get_chat_llm(backend: str = "openai", model: str = "gpt-4o-mini", temperatur
                 openai_api_key=OPENAI_API_KEY or os.getenv("OPENAI_API_KEY",""),
             )
 
-        # 2) OpenAI SDK 폴백 (v1 스타일: from openai import OpenAI as _OpenAIClient)
+        # 2) OpenAI SDK 폴백
         try:
             from openai import OpenAI as _OpenAIClient  # 이미 상단에서 사용 중인 경로
             _client = _OpenAIClient(api_key=OPENAI_API_KEY or os.getenv("OPENAI_API_KEY",""))
@@ -803,7 +769,7 @@ def get_chat_llm(backend: str = "openai", model: str = "gpt-4o-mini", temperatur
         except Exception:
             pass
 
-        # 3) 구 SDK 폴백 (import openai; openai.ChatCompletion)
+        # 3) 구 SDK 폴백
         if 'openai' in globals() and openai and hasattr(openai, "ChatCompletion"):
             openai.api_key = OPENAI_API_KEY or os.getenv("OPENAI_API_KEY","")
             class _OpenAIChatLegacy:
@@ -820,7 +786,7 @@ def get_chat_llm(backend: str = "openai", model: str = "gpt-4o-mini", temperatur
 
         raise RuntimeError("OpenAI 백엔드를 사용할 수 없습니다. 키/패키지를 확인하세요.")
 
-    # ---------------- Gemini ----------------
+    # Gemini
     if b == "gemini":
         # 1) LangChain 우선
         if 'HAS_LANGCHAIN_GEMINI' in globals() and HAS_LANGCHAIN_GEMINI and 'ChatGoogleGenerativeAI' in globals() and ChatGoogleGenerativeAI:

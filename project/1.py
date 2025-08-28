@@ -331,7 +331,7 @@ for step in steps_data:
         checked = st.checkbox(
             "이 단계 학습 완료",
             value=st.session_state[PAGE_PROGRESS_KEY].get(step["name"], False),
-            key=f"{CATEGORY_NAME}_{step['name']}"
+            key=f"{CATEGORY_NAME}_{step['name']}"  # ← 네임스페이스로 키 충돌 방지
         )
         st.session_state[PAGE_PROGRESS_KEY][step["name"]] = checked
         if checked:

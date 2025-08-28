@@ -217,7 +217,7 @@ for s in steps_data:
         checked = st.checkbox(
             "이 단계 학습 완료",
             value=st.session_state[PAGE_PROGRESS_KEY].get(s["name"], False),
-            key=f"{CATEGORY_NAME}_{s['name']}"
+            key=f"{CATEGORY_NAME}_{s['name']}" # ← 네임스페이스로 키 충돌 방지
         )
         st.session_state[PAGE_PROGRESS_KEY][s["name"]] = checked
         if checked: completed += 1
@@ -358,7 +358,7 @@ else:
                 st.session_state.chat_history.append({"role":"assistant", "content":answer, "sources":srcs})
 
         else:
-            #수동 RAG 폴백: 문서 검색 + 대화맥락/발췌를 직접 프롬프트에 주입
+            # 수동 RAG 폴백: 문서 검색 + 대화맥락을 직접 프롬프트에 주입
             with st.chat_message("assistant"):
                 with st.status("검색 및 응답 생성 중...", expanded=False):
                     llm = st.session_state.get("llm", None)
@@ -404,7 +404,7 @@ else:
 
                 st.markdown(answer)
 
-                # 출처 요약(수동 경로)
+                # 출처 요약
                 srcs = []
                 for sdoc in (docs or []):
                     meta = getattr(sdoc, "metadata", {}) or {}
@@ -414,18 +414,18 @@ else:
                         for i, meta in enumerate(srcs, 1):
                             st.caption(f"{i}. {meta}")
 
-                # 히스토리 저장(출처 포함)
+                # 히스토리 저장
                 st.session_state.chat_history.append({"role":"assistant", "content":answer, "sources":srcs})
 
-# 랜덤 문제 생성기 + 채점
+# 랜덤 문제 생성기  채점
 st.subheader("랜덤 문제 생성기")
 CATEGORY_NAME = "포토리소그래피"  # ← 페이지 주제명
 
 # (중복 회피용)
 hist_key = f"{CATEGORY_NAME}_quiz_history"
 if hist_key not in st.session_state:
-    # 문자열(서술형 질문) 또는 MC 질문 텍스트 저장
-    st.session_state[hist_key] = []
+
+    st.session_state[hist_key] = [] # 문자열(서술형 질문) 또는 MC 질문 텍스트 저장
 
 # 설정
 cols = st.columns(3)
@@ -448,7 +448,7 @@ with_context = cols[2].checkbox(
     key=f"{CATEGORY_NAME}_with_context"
 )
 
-# 프롬프트 템플릿
+# 프롬프트
 QUIZ_PROMPT_MC = """\
 당신은 반도체 공정 과목의 교수입니다.
 주제: {category}

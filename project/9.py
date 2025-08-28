@@ -14,13 +14,11 @@ from LLM import (
     get_selected_images,
 )
 
-# 세션 준비
 init_session_state()
 
-# ===== UI 시작 =====
 st.title(APP_TITLE)
 
-# 1️⃣ 음성 인식 (자동 질문/응답/TTS)
+# 음성 인식 (자동 질문/응답/TTS)
 with st.container():
     st.markdown("### 1️⃣ 음성 인식 (자동 질문/응답)")
     st.caption("말하고 멈추면 자동으로 문장 변환 → 답변 생성 → 선택 시 음성으로 재생합니다.")
@@ -41,7 +39,7 @@ with st.container():
                 if fn and os.path.exists(fn):
                     autoplay_audio_from_file(fn)
 
-# 2️⃣ 이미지 업로드 (여러 장)
+# 이미지 업로드 (여러 장 가능)
 with st.container():
     st.markdown("### 2️⃣ 이미지 업로드")
     files = st.file_uploader(
@@ -69,7 +67,7 @@ with st.container():
             st.session_state.upload_images = []
             st.success("업로드 이미지 목록을 비웠습니다.")
 
-# 3️⃣ 카메라 촬영 (여러 장)
+# 카메라 촬영 (여러 장 가능)
 with st.container():
     st.markdown("### 3️⃣ 카메라 촬영")
     cam = st.camera_input("카메라로 촬영")
@@ -116,7 +114,7 @@ with col_a:
 with col_b:
     tts_chat = st.checkbox("챗봇 음성 응답", value=True)
 
-# 과거 대화 렌더 (최근이 아래로 내려오도록 순서대로 출력)
+# 과거 대화 (최근 대화가 아래로 내려옴)
 if st.session_state.chat_dialog:
     for msg in st.session_state.chat_dialog:
         with st.chat_message("user" if msg["role"] == "user" else "assistant"):
@@ -129,9 +127,8 @@ with st.form("chat_form", clear_on_submit=True):
     audio_chat_bytes = audio_recorder(text="녹음", key="chat_mic") if use_mic else None
     submitted = st.form_submit_button("Send")
 
-# 제출 처리
 if submitted:
-    # 1) 음성 입력이 있고 텍스트가 비어있으면 음성부터 문자로 변환
+    # 음성 입력이 있고 텍스트가 비어있으면 음성부터 문자로 변환
     if (not user_text or not user_text.strip()) and audio_chat_bytes:
         try:
             user_text = transcribe_audio_bytes(audio_chat_bytes) or ""
@@ -141,13 +138,12 @@ if submitted:
     if not user_text or not user_text.strip():
         st.info("질문을 입력하거나 음성으로 말씀해 주세요.")
     else:
-        # 2) 사용자 메시지 기록 및 표시
+        # 사용자 메시지 기록 및 표시
         st.session_state.chat_dialog.append({"role": "user", "content": user_text})
         with st.chat_message("user"):
             st.markdown(user_text)
 
-        # 3) 최근 대화 맥락(간단) 구성
-        #   - 마지막 6개 메시지를 '사용자/도우미:' 형태로 합쳐 LLM에 컨텍스트로 전달
+        # 최근 대화 맥락 구성
         tail = st.session_state.chat_dialog[-12:]  # user/assistant 합쳐 최대 12개 = 최근 6턴
         hist_lines = []
         for m in tail:
@@ -155,11 +151,10 @@ if submitted:
             hist_lines.append(f"{role}: {m['content']}")
         hist_txt = "\n".join(hist_lines)
 
-        # 4) 이미지 선택(업로드/카메라) 포함
+        # 4) 이미지 선택
         images = get_selected_images()
 
-        # 5) 프롬프트 구성 → ask_llm 호출
-        #    (LLM.py의 SYSTEM_PROMPT가 적용되며, 여기서는 대화 맥락을 텍스트로 주입)
+        # 5) 프롬프트 구성
         full_prompt = (
             "아래의 최근 대화를 참고하여, 이어지는 사용자의 질문에 정중한 한국어(존댓말)로 답변해 주세요.\n\n"
             f"[최근 대화]\n{hist_txt or '(이전 대화 없음)'}\n\n"
@@ -174,7 +169,7 @@ if submitted:
             # 6) 응답 저장
             st.session_state.chat_dialog.append({"role": "assistant", "content": answer})
 
-            # 7) 음성 응답(선택)
+            # 7) 음성 응답
             if tts_chat:
                 fn = speak_text(answer)
                 if fn and os.path.exists(fn):

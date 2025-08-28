@@ -61,12 +61,11 @@ items = "".join(
 import streamlit.components.v1 as components
 components.html(html.format(items=items), height=120, scrolling=False)
 
-# =========================
-# 공정 단계 설명 + 진도 관리
-# =========================
+# 공정 단계 설명
+
 st.subheader("공정 단계 설명 및 진도 관리")
 
-# --- 단계 데이터 (CMP 공정) : 고정 id 사용 ---
+# 단계별 정보
 steps_data = [
     {
         "id": "cmp_pad_cond",
@@ -185,14 +184,14 @@ CMP 후 최종적으로 표면 상태와 두께, 평탄도를 측정하는 단�
     }
 ]
 
-# --- 진도 상태 초기화/동기화 (id 기준으로 안전하게) ---
+# 페이지 진도 버킷
 ids = [s["id"] for s in steps_data]
 if "progress" not in st.session_state:
     st.session_state.progress = {}
 for sid in ids:
     st.session_state.progress.setdefault(sid, False)
 
-# --- 단계별 설명 + 체크박스 ---
+# 단계별 설명 및 체크박스
 completed = 0
 for step in steps_data:
     sid, name, icon = step["id"], step["name"], step["icon"]
@@ -206,28 +205,22 @@ for step in steps_data:
         if checked:
             completed += 1
 
-# --- 전체 진도율 ---
+# 전체 진도율 표시
 total = len(steps_data)
 percent = int((completed / total) * 100) if total else 0
 st.progress(percent)
 st.caption(f"📘 학습 진도: {completed} / {total} 단계 완료 ({percent}%)")
 
-# ---------------- 질의응답 (RAG · 챗봇 UI · LLM.py 함수 사용) ----------------
+# 질의응답
 st.subheader("질의응답")
 
-# ── 질의응답 상단 툴바: 대화 초기화 버튼
+# 질의응답 상단 툴바: 대화 초기화 버튼
 c1, c2 = st.columns([1, 9])
 with c1:
     if st.button("대화 초기화", key="btn_clear_qa", use_container_width=True, help="질의응답 대화 내용 전체 삭제"):
         # 대화 이력 비우기
         st.session_state["chat_history"] = []
 
-        # (선택) 체인 재생성을 원하시면 아래 주석을 해제
-        # st.session_state.pop("qa_chain", None)
-        # st.session_state.pop("qa_mode", None)
-
-        # (선택) 요약 메모리 등을 쓰신다면 함께 초기화
-        # st.session_state.pop("MEMORY", None)
 
         st.toast("질의응답 대화가 초기화되었습니다. 🧹")
         (st.rerun if hasattr(st, "rerun") else st.experimental_rerun)()
@@ -238,7 +231,7 @@ if "vectorstore" not in st.session_state:
     st.info("임베딩 자료가 없습니다. 메인에서 PDF 업로드 → 임베딩 생성 후 이용하세요.")
 else:
     if "qa_chain" not in st.session_state:
-        # ⬇️ LLM.py의 함수로 백엔드/모델/LLM을 가져옵니다.
+        # LLM.py의 함수로 백엔드/모델/LLM을 가져옴.
         try:
             backend, model = get_llm_backend()   # "openai" | "gemini", 모델 문자열
         except Exception:
@@ -253,7 +246,7 @@ else:
 
         retriever = st.session_state.vectorstore.as_retriever(search_kwargs={"k": 4})
 
-        # 메모리 지원 체인 구성: CRC 우선, 실패 시 수동 RAG 폴백용 상태 저장
+        # PDF우선 PDF에 내용 없으면 LLM이 알아서 답변해줌
         st.session_state.retriever = retriever
         st.session_state.llm = llm
         st.session_state.qa_mode = "manual"   # 기본 수동, CRC 되면 "crc"로 변경
@@ -281,14 +274,14 @@ else:
                 )
                 st.session_state.qa_mode = "crc"
             except Exception:
-                # CRC 불가(비호환 LLM 등) → 수동 RAG로 처리
+                # 정보 없으면 LLM 알아서 답변
                 st.session_state.qa_chain = None
 
     # 채팅 내역 초기화
     if "chat_history" not in st.session_state:
         st.session_state.chat_history = []   # [{'role':'user'|'assistant', 'content': str, 'sources': list}]
 
-    # 과거 채팅 표시 (최근 2개만 기본, 나머지는 펼쳐서 보기)
+    # 과거 채팅 표시 (최근 2개만 보이고 나머지는 펼쳐서 볼 수 있음)
     if st.session_state.chat_history:
         older = st.session_state.chat_history[:-2]
         recent = st.session_state.chat_history[-2:]
@@ -311,12 +304,12 @@ else:
                         for i, meta in enumerate(msg["sources"], 1):
                             st.caption(f"{i}. {meta}")
 
-    # ===== 입력창 =====
+    # 입력창
     with st.form("qa_form", clear_on_submit=True):
         user_q = st.text_input("질문을 입력하세요… (예: EUV와 DUV 차이)", key="qa_text")
         submitted = st.form_submit_button("Send")
 
-    # ✅ 버튼을 눌렀고 비어 있지 않을 때만 생성
+    # 버튼을 눌렀고 비어 있지 않을 때만 생성
     if submitted and user_q and user_q.strip():
         # 1) 사용자 메시지 기록 & 표시
         st.session_state.chat_history.append({"role": "user", "content": user_q})
@@ -344,11 +337,11 @@ else:
                     with st.popover("출처 보기"):
                         for i, meta in enumerate(srcs, 1):
                             st.caption(f"{i}. {meta}")
-                # 히스토리 저장(출처 포함)
+                # 히스토리 저장
                 st.session_state.chat_history.append({"role":"assistant", "content":answer, "sources":srcs})
 
         else:
-            # ---- 수동 RAG 폴백: 문서 검색 + 대화맥락/발췌를 직접 프롬프트에 주입
+            # 수동 RAG 폴백: 문서 검색 + 대화맥락을 직접 프롬프트에 주입
             with st.chat_message("assistant"):
                 with st.status("검색 및 응답 생성 중...", expanded=False):
                     llm = st.session_state.get("llm", None)
@@ -394,7 +387,7 @@ else:
 
                 st.markdown(answer)
 
-                # 출처 요약(수동 경로)
+                # 출처 요약
                 srcs = []
                 for sdoc in (docs or []):
                     meta = getattr(sdoc, "metadata", {}) or {}
@@ -404,15 +397,15 @@ else:
                         for i, meta in enumerate(srcs, 1):
                             st.caption(f"{i}. {meta}")
 
-                # 히스토리 저장(출처 포함)
+                # 히스토리 저장
                 st.session_state.chat_history.append({"role":"assistant", "content":answer, "sources":srcs})
 
 
-# ---------------- 랜덤 문제 생성기 + 채점 ----------------
+# 랜덤 문제 생성기  채점
 st.subheader("랜덤 문제 생성기")
 CATEGORY_NAME = "포토리소그래피"  # ← 페이지 주제명
 
-# (중복 회피용 히스토리)
+# (중복 회피용)
 hist_key = f"{CATEGORY_NAME}_quiz_history"
 if hist_key not in st.session_state:
     st.session_state[hist_key] = []  # 문자열(서술형 질문) 또는 MC 질문 텍스트 저장
@@ -438,7 +431,7 @@ with_context = cols[2].checkbox(
     key=f"{CATEGORY_NAME}_with_context"
 )
 
-# 프롬프트 템플릿 (변수)
+# 프롬프트
 QUIZ_PROMPT_MC = """\
 당신은 반도체 공정 과목의 교수입니다.
 주제: {category}
@@ -593,7 +586,7 @@ if st.button("랜덤 문제 생성", use_container_width=True):
             bar.progress(100)
     ph.empty()
 
-# ----- 문제 표시 + 답안 입력 / 채점 -----
+# 문제 표시 답안 입력  채점
 items = st.session_state.get(f"{CATEGORY_NAME}_quiz_items", [])
 mode  = st.session_state.get(f"{CATEGORY_NAME}_quiz_mode", "고급")
 
@@ -601,7 +594,7 @@ if items:
     st.markdown("### 생성된 문제")
 
     if mode == "초급":
-        # 객관식 렌더링
+        # 객관식
         for i, it in enumerate(items, start=1):
             st.markdown(f"**{i}) {it['q']}**")
             key = f"{CATEGORY_NAME}_mc_{i-1}"
@@ -620,7 +613,7 @@ if items:
                 st.markdown(f"피드백: {it.get('expl','(해설 없음)')}")
                 st.markdown("---")
     else:
-        # 서술형 렌더링 (LLM 채점)
+        # 서술형
         for i, qtext in enumerate(items, start=1):
             st.markdown(f"**{i}) {qtext}**")
             st.text_area(
@@ -629,7 +622,7 @@ if items:
                 height=100,
                 placeholder="여기에 본인 답안을 작성하세요."
             )
-
+        채점
         if st.button("채점하기", type="primary", use_container_width=True):
             backend, model = get_llm_backend()
             context = gather_context(k=6, enabled=with_context, retriever=st.session_state.vectorstore.as_retriever(search_kwargs={"k": 6}) if has_vs else None)
