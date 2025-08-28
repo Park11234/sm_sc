@@ -222,7 +222,7 @@ percent = int((completed / total) * 100)
 st.progress(percent)
 st.caption(f"📘 학습 진도: {completed} / {total} 단계 완료 ({percent}%)")
 # ---------------- 질의응답 (RAG · 챗봇 UI · LLM.py 함수 사용) ----------------
-st.subheader("질의응답 (RAG · 챗봇)")
+st.subheader("질의응답")
 
 # ── 질의응답 상단 툴바: 대화 초기화 버튼
 c1, c2 = st.columns([1, 9])

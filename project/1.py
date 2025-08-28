@@ -331,7 +331,7 @@ for step in steps_data:
         checked = st.checkbox(
             "이 단계 학습 완료",
             value=st.session_state[PAGE_PROGRESS_KEY].get(step["name"], False),
-            key=f"{CATEGORY_NAME}_{step['name']}"   # ← 페이지 네임스페이스
+            key=f"{CATEGORY_NAME}_{step['name']}"
         )
         st.session_state[PAGE_PROGRESS_KEY][step["name"]] = checked
         if checked:
@@ -342,8 +342,8 @@ total = len(steps_data)
 percent = int((completed / total) * 100)
 st.progress(percent)
 st.caption(f"📘 학습 진도: {completed} / {total} 단계 완료 ({percent}%)")
-# ---------------- 질의응답 (RAG · 챗봇 UI · LLM.py 함수 사용) ----------------
-st.subheader("질의응답 (RAG · 챗봇)")
+# 질의응답
+st.subheader("질의응답")
 
 # 질의응답 상단 툴바: 대화 초기화 버튼
 c1, c2 = st.columns([1, 9])
@@ -360,7 +360,7 @@ if "vectorstore" not in st.session_state:
     st.info("임베딩 자료가 없습니다. 메인에서 PDF 업로드 → 임베딩 생성 후 이용하세요.")
 else:
     if "qa_chain" not in st.session_state:
-        # ⬇️ LLM.py의 함수로 백엔드/모델/LLM을 가져옵니다.
+        # LLM.py의 함수로 백엔드/모델/LLM 가져옴
         try:
             backend, model = get_llm_backend()   # "openai" | "gemini", 모델 문자열
         except Exception:
@@ -378,11 +378,11 @@ else:
         # PDF우선 PDF에 내용 없으면 LLM이 알아서 답변해줌
         st.session_state.retriever = retriever
         st.session_state.llm = llm
-        st.session_state.qa_mode = "manual"   # 기본 수동, CRC 되면 "crc"로 변경
+        st.session_state.qa_mode = "manual"   # 기본 수동이지만 CRC 되면 "crc"로 변경
 
         if llm is not None:
             try:
-                # ▼ CRC 시도 (이전 대화 맥락을 직접 넘길 수 있음)
+                # CRC 시도 (이전 대화 맥락을 직접 넘길 수 있음)
                 from langchain.chains import ConversationalRetrievalChain
                 from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
 
@@ -516,7 +516,7 @@ else:
 
                 st.markdown(answer)
 
-                # 출처 요약(수동 경로)
+                # 출처 요약
                 srcs = []
                 for sdoc in (docs or []):
                     meta = getattr(sdoc, "metadata", {}) or {}
@@ -526,7 +526,7 @@ else:
                         for i, meta in enumerate(srcs, 1):
                             st.caption(f"{i}. {meta}")
 
-                # 히스토리 저장(출처 포함)
+                # 히스토리 저장
                 st.session_state.chat_history.append({"role":"assistant", "content":answer, "sources":srcs})
 
 
@@ -742,7 +742,7 @@ if items:
                 st.markdown(f"피드백: {it.get('expl','(해설 없음)')}")
                 st.markdown("---")
     else:
-        # 채점
+        # 서술형
         for i, qtext in enumerate(items, start=1):
             st.markdown(f"**{i}) {qtext}**")
             st.text_area(
@@ -751,7 +751,7 @@ if items:
                 height=100,
                 placeholder="여기에 본인 답안을 작성하세요."
             )
-
+        # 채점
         if st.button("채점하기", type="primary", use_container_width=True):
             backend, model = get_llm_backend()
             context = gather_context(k=6, enabled=with_context, retriever=st.session_state.vectorstore.as_retriever(search_kwargs={"k": 6}) if has_vs else None)

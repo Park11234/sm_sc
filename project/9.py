@@ -96,13 +96,10 @@ with st.container():
             st.success("카메라 이미지 목록을 비웠습니다.")
     st.caption("두 체크 모두 켜면 카메라 이미지가 먼저, 업로드 이미지가 다음으로 함께 전송됩니다.")
 
-# =========================
-# 4️⃣ 멀티모달 챗봇 (맨 아래 위치)
-# =========================
+# 챗봇
 st.markdown("---")
 st.header("질의응답")
 
-# 세션 상태 준비
 if "chat_dialog" not in st.session_state:
     st.session_state.chat_dialog = []   # [{'role':'user'|'assistant','content':str}]
 

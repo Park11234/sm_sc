@@ -1,17 +1,14 @@
-import os
 import streamlit as st
 import streamlit.components.v1 as components
 
 from LLM import (
     is_similar,
-    get_llm_backend,
     generate_with_openai,
     generate_with_gemini,
     gather_context,
     extract_questions,
     parse_mc_questions,
     parse_eval,
-    get_chat_llm,
     get_llm_backend,
     get_chat_llm,
     hist_pairs,
@@ -231,7 +228,7 @@ percent = int((completed / total) * 100)
 st.progress(percent)
 st.caption(f"📘 학습 진도: {completed} / {total} 단계 완료 ({percent}%)")
 # ---------------- 질의응답 (RAG · 챗봇 UI · LLM.py 함수 사용) ----------------
-st.subheader("질의응답 (RAG · 챗봇)")
+st.subheader("질의응답")
 
 # ── 질의응답 상단 툴바: 대화 초기화 버튼
 c1, c2 = st.columns([1, 9])
