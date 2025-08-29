@@ -2,7 +2,7 @@ import streamlit as st
 
 st.set_page_config(page_title="Main Page", page_icon="📘", layout="wide")
 
-st.title("Main Page")
+st.title("모두를 위한 반도체 교육, 모두를 위한 AI 학습 파트너")
 st.info("이동은 사이드바 네비게이션에서 해당 페이지를 선택해 주세요.")
 
 st.markdown("---")
