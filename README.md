@@ -16,6 +16,10 @@ PDF 학습 자료를 업로드하면 텍스트를 분할·벡터화(FAISS)하여
 학습 평가는 난이도 선택형 랜덤 문제와 간단 해설, 진도율 표시로 이루어져 이해 수준을 정량적으로 확인할 수 있습니다.
 전체 학습 흐름은 자료 업로드 → RAG 질의응답 → 단계별 학습 → 퀴즈 평가로 설계되어, 반복 가능한 자기주도 학습 사이클을 제공합니다.
 
+---
+## 🎥 시연 영상 (Demo Video)
+
+[![시연 영상 보기](https://img.youtube.com/vi/uW6cQvnM6xE/hqdefault.jpg)](https://youtu.be/uW6cQvnM6xE "YouTube로 이동")
 ---                                  
 
 ## 👨‍💻 팀원
@@ -160,11 +164,6 @@ PDF 학습 자료를 업로드하면 텍스트를 분할·벡터화(FAISS)하여
     <td align="center"><img src="https://github.com/user-attachments/assets/b30acdd8-ea46-40bb-af5d-260e27b5ef1a" alt="단계별 카드" width="230"></td>
   </tr>
 </table>
-
-## 🎥 시연 영상 (Demo Video)
-
-[![시연 영상 보기](https://img.youtube.com/vi/uW6cQvnM6xE/hqdefault.jpg)](https://youtu.be/uW6cQvnM6xE "YouTube로 이동")
-
 ---
 # 📚 반도체 학습 모듈 개요
 ### 1️⃣ 포토리소그래피 (Photolithography)
