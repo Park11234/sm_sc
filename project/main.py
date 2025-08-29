@@ -55,7 +55,7 @@ with col1:
     )
 
 with col2:
-    st.image("img/화면 캡처 2025-08-27 174601.png", caption="포토리소그래피 예시", use_container_width=True)
+    st.image("img/POTO", caption="포토리소그래피 예시", use_container_width=True)
 
 
 st.markdown("---")
@@ -83,4 +83,4 @@ with col1:
         """)
 
 with col2:
-    st.image("img/접근성 예시.png", caption="접근성+ 예시", use_container_width=True)
+    st.image("img/HI.png", caption="접근성+ 예시", use_container_width=True)
